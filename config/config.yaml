@@ -1,0 +1,12 @@
+server:
+  port: 8080
+  db_path: "sanctions.db"
+
+screening:
+  default_threshold: 0.8
+
+lists:
+  - ofac
+  - eu
+
+data_dir: "./data"

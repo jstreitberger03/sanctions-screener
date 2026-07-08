@@ -1,0 +1,164 @@
+openapi: "3.1.0"
+info:
+  title: sanctions-screener API
+  version: "0.1.0"
+  description: Sanctions screening REST API for name matching against OFAC/EU/UN lists.
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+  /screen:
+    post:
+      summary: Screen a single name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScreenRequest"
+      responses:
+        "200":
+          description: Screening result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScreenResponse"
+        "400":
+          description: Invalid request
+  /screen/batch:
+    post:
+      summary: Bulk screen multiple names
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchRequest"
+      responses:
+        "200":
+          description: Batch screening results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchResponse"
+        "400":
+          description: Invalid request
+  /lists:
+    get:
+      summary: List available sanctions lists
+      responses:
+        "200":
+          description: Available lists with counts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListEntry"
+  /lists/{id}/count:
+    get:
+      summary: Entry count for a specific list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List count
+        "400":
+          description: List not found
+components:
+  schemas:
+    ScreenRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        threshold:
+          type: number
+          default: 0.8
+        lists:
+          type: array
+          items:
+            type: string
+    MatchResponse:
+      type: object
+      properties:
+        person_id:
+          type: string
+        name:
+          type: string
+        score:
+          type: number
+        match_type:
+          type: string
+          enum: [exact, alias, fuzzy, initial]
+        list:
+          type: string
+        nationality:
+          type: string
+    ScreenResponse:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchResponse"
+        screening_time_ms:
+          type: integer
+        input_name:
+          type: string
+        count:
+          type: integer
+    BatchRequest:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          items:
+            type: string
+        threshold:
+          type: number
+          default: 0.8
+        lists:
+          type: array
+          items:
+            type: string
+    BatchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenResponse"
+        screening_time_ms:
+          type: integer
+        total_matches:
+          type: integer
+    ListEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer

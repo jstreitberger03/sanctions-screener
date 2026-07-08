@@ -1,0 +1,47 @@
+[
+  {
+    "number": "SDN-001",
+    "name": "Mohammed Al-Rashid",
+    "type": "Individual",
+    "programs": "SYRIA",
+    "nationality": "SY",
+    "dob": "1985-06-15",
+    "remarks": "Associated with Syrian regime"
+  },
+  {
+    "number": "SDN-002",
+    "name": "Li Fang Wei",
+    "type": "Individual",
+    "programs": "ILLICIT-DRUGS",
+    "nationality": "CN",
+    "dob": "1978-03-22",
+    "remarks": "Drug trafficking organization"
+  },
+  {
+    "number": "SDN-003",
+    "name": "Viktor Ivanov",
+    "type": "Individual",
+    "programs": "UKRAINE-EO13661",
+    "nationality": "RU",
+    "dob": "1972-11-08",
+    "remarks": "Russian oligarch"
+  },
+  {
+    "number": "SDN-004",
+    "name": "Fatima Al-Hassan",
+    "type": "Individual",
+    "programs": "TERRORISM",
+    "nationality": "IQ",
+    "dob": "1990-01-30",
+    "remarks": "Financing terrorism"
+  },
+  {
+    "number": "SDN-005",
+    "name": "Khalid bin Mohammed",
+    "type": "Individual",
+    "programs": "SDGT",
+    "nationality": "SA",
+    "dob": "1982-08-12",
+    "remarks": "Global terrorism designation"
+  }
+]
