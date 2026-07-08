@@ -58,6 +58,14 @@ func (s *Store) ImportEU(path string) ([]models.Person, error) {
 	return persons, s.cache(persons)
 }
 
+func (s *Store) ImportJSONL(path string) ([]models.Person, error) {
+	persons, err := sanctions.Load(path, sanctions.FormatJSONL)
+	if err != nil {
+		return nil, fmt.Errorf("import jsonl: %w", err)
+	}
+	return persons, s.cache(persons)
+}
+
 func (s *Store) ImportJSON(path string) ([]models.Person, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

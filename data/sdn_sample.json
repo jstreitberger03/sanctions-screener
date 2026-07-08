@@ -1,47 +1,39 @@
 [
   {
-    "number": "SDN-001",
+    "id": "SDN-001",
     "name": "Mohammed Al-Rashid",
-    "type": "Individual",
-    "programs": "SYRIA",
+    "list_type": "OFAC",
     "nationality": "SY",
-    "dob": "1985-06-15",
-    "remarks": "Associated with Syrian regime"
+    "roles": ["SYRIA"]
   },
   {
-    "number": "SDN-002",
+    "id": "SDN-002",
     "name": "Li Fang Wei",
-    "type": "Individual",
-    "programs": "ILLICIT-DRUGS",
+    "aliases": ["Li Fangwei", "Karl Lee"],
+    "list_type": "OFAC",
     "nationality": "CN",
-    "dob": "1978-03-22",
-    "remarks": "Drug trafficking organization"
+    "roles": ["ILLICIT-DRUGS"]
   },
   {
-    "number": "SDN-003",
+    "id": "SDN-003",
     "name": "Viktor Ivanov",
-    "type": "Individual",
-    "programs": "UKRAINE-EO13661",
+    "aliases": ["Viktor Ivanovich"],
+    "list_type": "OFAC",
     "nationality": "RU",
-    "dob": "1972-11-08",
-    "remarks": "Russian oligarch"
+    "roles": ["UKRAINE-EO13661"]
   },
   {
-    "number": "SDN-004",
+    "id": "SDN-004",
     "name": "Fatima Al-Hassan",
-    "type": "Individual",
-    "programs": "TERRORISM",
+    "list_type": "OFAC",
     "nationality": "IQ",
-    "dob": "1990-01-30",
-    "remarks": "Financing terrorism"
+    "roles": ["TERRORISM"]
   },
   {
-    "number": "SDN-005",
+    "id": "SDN-005",
     "name": "Khalid bin Mohammed",
-    "type": "Individual",
-    "programs": "SDGT",
+    "list_type": "OFAC",
     "nationality": "SA",
-    "dob": "1982-08-12",
-    "remarks": "Global terrorism designation"
+    "roles": ["SDGT"]
   }
 ]

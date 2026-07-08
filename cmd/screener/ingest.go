@@ -33,10 +33,12 @@ var ingestCmd = &cobra.Command{
 			persons, err = store.ImportOFAC(ingestData)
 		case "eu":
 			persons, err = store.ImportEU(ingestData)
+		case "jsonl":
+			persons, err = store.ImportJSONL(ingestData)
 		case "json":
 			persons, err = store.ImportJSON(ingestData)
 		default:
-			return fmt.Errorf("unknown source: %s (use ofac, eu, json)", ingestSource)
+			return fmt.Errorf("unknown source: %s (use ofac, eu, json, jsonl)", ingestSource)
 		}
 
 		if err != nil {

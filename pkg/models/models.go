@@ -11,13 +11,13 @@ const (
 )
 
 type Person struct {
-	ID          string
-	Name        string
-	Aliases     []string
-	DOB         *time.Time
-	Nationality string
-	ListType    ListType
-	Roles       []string
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Aliases     []string   `json:"aliases,omitempty"`
+	DOB         *time.Time `json:"dob,omitempty"`
+	Nationality string     `json:"nationality,omitempty"`
+	ListType    ListType   `json:"list_type"`
+	Roles       []string   `json:"roles,omitempty"`
 }
 
 type MatchType string

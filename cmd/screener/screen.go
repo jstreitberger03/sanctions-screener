@@ -28,10 +28,14 @@ var screenCmd = &cobra.Command{
 		defer store.Close()
 
 		var allPersons []models.Person
-		for _, lt := range lists {
-			persons, err := store.LoadCached(models.ListType(lt))
+		lt := lists
+		if len(lt) == 0 {
+			lt = []string{"OFAC", "EU", "UN"}
+		}
+		for _, l := range lt {
+			persons, err := store.LoadCached(models.ListType(l))
 			if err != nil {
-				return fmt.Errorf("load list %s: %w", lt, err)
+				return fmt.Errorf("load list %s: %w", l, err)
 			}
 			allPersons = append(allPersons, persons...)
 		}

@@ -37,7 +37,7 @@ func init() {
 	screenCmd.Flags().StringVarP(&screeningName, "name", "n", "", "Name to screen")
 	screenCmd.Flags().StringVarP(&screeningFile, "file", "f", "", "CSV file to bulk screen")
 	screenCmd.Flags().Float64VarP(&threshold, "threshold", "t", 0.8, "Match threshold (0.0-1.0)")
-	screenCmd.Flags().StringSliceVarP(&lists, "list", "l", []string{"OFAC"}, "Sanctions lists to check")
+	screenCmd.Flags().StringSliceVarP(&lists, "list", "l", nil, "Sanctions lists to check (default: all available)")
 	screenCmd.Flags().StringVarP(&output, "output", "o", "", "Output file for results")
 
 	ingestCmd.Flags().StringVarP(&ingestSource, "source", "s", "ofac", "Source: ofac, eu, json")

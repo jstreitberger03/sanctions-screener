@@ -25,3 +25,6 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+data/eu_fsf_raw.json
+data/eu_full.csv
+data/eu_sanctions.json

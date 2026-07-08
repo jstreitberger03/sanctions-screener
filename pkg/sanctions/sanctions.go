@@ -14,8 +14,9 @@ import (
 type Format string
 
 const (
-	FormatCSV  Format = "csv"
-	FormatJSON Format = "json"
+	FormatCSV      Format = "csv"
+	FormatJSON     Format = "json"
+	FormatJSONL    Format = "jsonl"
 )
 
 func Normalize(name string) string {
@@ -27,9 +28,14 @@ func Normalize(name string) string {
 		"é", "e", "è", "e", "ê", "e", "ë", "e",
 		"í", "i", "ì", "i", "î", "i", "ï", "i",
 		"ó", "o", "ò", "o", "ô", "o", "õ", "o",
-		"ú", "u", "ù", "u", "û", "u", "ü", "u",
+		"ú", "u", "ù", "u", "û", "u",
 		"ý", "y", "ÿ", "y",
 		"ñ", "n", "ç", "c",
+		"ă", "a", "ą", "a", "ć", "c", "č", "c",
+		"ď", "d", "đ", "d", "ę", "e", "ě", "e",
+		"ğ", "g", "ı", "i", "ł", "l", "ń", "n",
+		"ň", "n", "ř", "r", "ś", "s", "š", "s",
+		"ţ", "t", "ť", "t", "ž", "z",
 	)
 	name = replacer.Replace(name)
 	return name
@@ -42,7 +48,7 @@ func Load(path string, format Format) ([]models.Person, error) {
 	}
 
 	switch format {
-	case FormatJSON:
+	case FormatJSON, FormatJSONL:
 		return parseJSON(data)
 	case FormatCSV:
 		return parseCSV(strings.NewReader(string(data)))
@@ -51,39 +57,163 @@ func Load(path string, format Format) ([]models.Person, error) {
 	}
 }
 
-type ofacEntry struct {
-	Number      string `json:"number"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Programs    string `json:"programs"`
-	Nationality string `json:"nationality"`
-	DOB         string `json:"dob"`
-	Remarks     string `json:"remarks"`
+type flexStringSlice []string
+
+func (f *flexStringSlice) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '[' {
+		var s []string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*f = s
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*f = []string{s}
+	return nil
+}
+
+type simpleEntry struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Aliases     []string        `json:"aliases"`
+	Nationality string          `json:"nationality"`
+	ListType    string          `json:"list"`
+	Type        string          `json:"type"`
+	Programs    flexStringSlice `json:"programs"`
 }
 
 func parseJSON(data []byte) ([]models.Person, error) {
-	var entries []ofacEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, fmt.Errorf("parse json: %w", err)
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty data")
+	}
+
+	dataStr := string(data)
+	if strings.TrimSpace(dataStr)[0] == '[' {
+		var entries []simpleEntry
+		if err := json.Unmarshal(data, &entries); err != nil {
+			return nil, fmt.Errorf("parse json array: %w", err)
+		}
+		return fromSimple(entries), nil
 	}
 
 	var persons []models.Person
-	for _, e := range entries {
-		p := models.Person{
-			ID:          e.Number,
-			Name:        e.Name,
-			Nationality: e.Nationality,
-			ListType:    models.ListOFAC,
+	for _, line := range strings.Split(dataStr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		if e.DOB != "" {
-			dob, err := time.Parse("2006-01-02", e.DOB)
-			if err == nil {
-				p.DOB = &dob
-			}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
 		}
-		persons = append(persons, p)
+		schema, _ := raw["schema"].(string)
+		if schema != "Person" && schema != "Organization" {
+			continue
+		}
+		p := openSanctionsToPerson(raw)
+		if p != nil {
+			persons = append(persons, *p)
+		}
 	}
+
 	return persons, nil
+}
+
+func openSanctionsToPerson(raw map[string]any) *models.Person {
+	props, ok := raw["properties"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	names, _ := props["name"].([]any)
+	if len(names) == 0 {
+		return nil
+	}
+	name, _ := names[0].(string)
+	if name == "" {
+		return nil
+	}
+
+	aliasesRaw, _ := props["alias"].([]any)
+	aliases := make([]string, 0, len(aliasesRaw))
+	for _, a := range aliasesRaw {
+		if s, ok := a.(string); ok {
+			aliases = append(aliases, s)
+		}
+	}
+
+	countries, _ := props["country"].([]any)
+	nationality := "unknown"
+	if len(countries) > 0 {
+		if c, ok := countries[0].(string); ok {
+			nationality = strings.ToUpper(c)
+		}
+	}
+
+	birthDate := ""
+	birthDates, _ := props["birthDate"].([]any)
+	if len(birthDates) > 0 {
+		if bd, ok := birthDates[0].(string); ok {
+			birthDate = bd
+		}
+	}
+
+	var dob *time.Time
+	if t, err := time.Parse("2006-01-02", birthDate); err == nil {
+		dob = &t
+	}
+
+	schema, _ := raw["schema"].(string)
+
+	programsRaw, _ := props["programId"].([]any)
+	roles := make([]string, 0, len(programsRaw))
+	for _, p := range programsRaw {
+		if s, ok := p.(string); ok {
+			roles = append(roles, s)
+		}
+	}
+
+	listType := models.ListEU
+
+	switch schema {
+	case "Person":
+		roles = append(roles, "individual")
+	case "Organization":
+		roles = append(roles, "entity")
+	}
+
+	return &models.Person{
+		ID:          raw["id"].(string),
+		Name:        name,
+		Aliases:     aliases,
+		Nationality: nationality,
+		ListType:    listType,
+		Roles:       roles,
+		DOB:         dob,
+	}
+}
+
+func fromSimple(entries []simpleEntry) []models.Person {
+	persons := make([]models.Person, 0, len(entries))
+	for _, e := range entries {
+		lt := models.ListEU
+		if e.ListType != "" {
+			lt = models.ListType(e.ListType)
+		}
+		persons = append(persons, models.Person{
+			ID:          e.ID,
+			Name:        e.Name,
+			Aliases:     e.Aliases,
+			Nationality: e.Nationality,
+			ListType:    lt,
+			Roles:       []string(e.Programs),
+		})
+	}
+	return persons
 }
 
 func parseCSV(r *strings.Reader) ([]models.Person, error) {

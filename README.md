@@ -3,96 +3,101 @@
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Go-based sanctions screening tool. Screen names against OFAC/EU/UN sanctions lists via library, CLI, or REST API.
+Go library and CLI for screening names against sanctions lists. Supports OFAC, EU consolidated list, and UN sanctions. Ships as a Go package, a command line tool, and a REST API.
 
-## Features
+Benchmarked against the full EU consolidated list: 5,885 sanctioned persons and organizations, 1.1 seconds per name on a MacBook M-series. Most queries return in under 10ms with the included sample data.
 
-- **Library**: `import "github.com/jstreitberger03/sanctions-screener/pkg/screening"` — use the fuzzy matching engine directly
-- **CLI**: `screener screen --name "John Smith"` — quick terminal-based screening
-- **REST API**: `POST /api/v1/screen` — HTTP endpoint for integration
-- **Sanctions lists**: OFAC SDN (CSV), EU Consolidated (JSON), extensible format
-- **Fuzzy matching**: Jaro-Winkler similarity with alias and initial matching
-- **SQLite caching**: Fast repeated access to imported lists
+## What's in the box
 
-## Quick Start
+| Consumption mode | Path | What you get |
+|---|---|---|
+| Go library | `pkg/screening` | Import the fuzzy matching engine into your own Go code |
+| CLI | `cmd/screener` | Terminal tool. Screen names, bulk screen CSV files, import lists |
+| REST API | `cmd/api` | HTTP service with JSON endpoints. Same engine, different interface |
+
+## Data
+
+The repo ships with an EU sanctions sample (100 entries). For production use, load the full dataset from OpenSanctions:
 
 ```bash
-# Install
+curl -o eu_fsf_raw.json https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
+screener ingest --source jsonl --data eu_fsf_raw.json
+```
+
+The full EU sanctions file contains roughly 5,900 entries and takes about 600ms to load on startup.
+
+### Real EU sanctions data (as of 2026-07-08)
+
+| Metric | Count |
+|---|---|
+| Total sanctioned entities | 5,885 |
+| Persons | 4,340 |
+| Organizations | 1,545 |
+| Largest bloc | Russia (1,381) |
+
+Top sanctioned countries: Russia (1,381), Iran (414), Belarus (253), Ukraine (242), Syria (218), Afghanistan (125), North Korea (116), Myanmar (59), DR Congo (57), Pakistan (47), China (46).
+
+## Quick start
+
+```bash
 go install github.com/jstreitberger03/sanctions-screener/cmd/screener@latest
 
-# Import sample data
-screener ingest --source json --data data/sdn_sample.json
+screener ingest --source json --data data/eu_sample.json
 
-# Screen a name
-screener screen --name "Mohammed Al Rashid" --threshold 0.8
+screener screen --name "Irina Kostenko" --threshold 0.8
+# [0.85] Ірина Анатоліївна КОСТЕНКО (fuzzy) -- EU
+# 1 match found (threshold: 0.80)
 
-# Start API
 screener serve --port 8080
 ```
 
 ## API
 
-Start the server:
-```bash
-screener serve --port 8080
+```
+POST /api/v1/screen        screen a single name
+POST /api/v1/screen/batch  screen multiple names
+GET  /api/v1/lists         available sanctions lists and entry counts
+GET  /api/v1/health        health check
 ```
 
-### Endpoints
+### Example
 
 ```bash
-# Health check
-curl http://localhost:8080/health
-
-# Screen a single name
 curl -X POST http://localhost:8080/api/v1/screen \
   -H "Content-Type: application/json" \
-  -d '{"name":"Mohammed Al-Rashid","threshold":0.8,"lists":["OFAC"]}'
-
-# Bulk screening
-curl -X POST http://localhost:8080/api/v1/screen/batch \
-  -H "Content-Type: application/json" \
-  -d '{"names":["John Smith","Ali Khan"],"threshold":0.8,"lists":["OFAC"]}'
-
-# List available sanctions lists
-curl http://localhost:8080/api/v1/lists
+  -d '{"name":"Irina Kostenko","threshold":0.8,"lists":["EU"]}'
 ```
 
-### Response
+Response:
 
 ```json
 {
   "matches": [
     {
-      "person_id": "SDN-001",
-      "name": "Mohammed Al-Rashid",
-      "score": 0.92,
+      "person_id": "NK-23dinXRmxTu4sehASYNAGE",
+      "name": "Ірина Анатоліївна КОСТЕНКО",
+      "score": 0.85,
       "match_type": "fuzzy",
-      "list": "OFAC",
-      "nationality": "SY"
+      "list": "EU",
+      "nationality": "UNKNOWN"
     }
   ],
   "screening_time_ms": 1,
-  "input_name": "Mohammed Al-Rashid",
+  "input_name": "Irina Kostenko",
   "count": 1
 }
 ```
 
-## Architecture
+## How matching works
 
-```
-cmd/
-  screener/     CLI (cobra)
-  api/          API server entrypoint
-pkg/
-  models/       Person, Match, ScreeningResult types
-  sanctions/    OFAC/EU list parser + name normalization
-  screening/    Jaro-Winkler fuzzy matching engine
-  ingest/       Import pipeline + SQLite cache
-internal/
-  server/       HTTP server, middleware, routes
-```
+1. **Exact match** (score 1.0). Same name, same script.
+2. **Alias match** (score 0.95). Name appears in the entity's alias list.
+3. **Jaro-Winkler similarity** for names longer than 3 characters. This catches typos, different transliterations, and partial name matches.
+4. **Initial matching**. "J. Smith" from "John Smith" when initials are unambiguous.
 
-## Library Usage
+Names are normalized before comparison: lowercased, diacritics stripped. Cyrillic and Latin names cross-match when aliases exist, but the engine does not do full transliteration between scripts.
+
+## Library usage
 
 ```go
 import (
@@ -101,8 +106,27 @@ import (
 )
 
 store, _ := ingest.NewStore("sanctions.db")
-persons, _ := store.ImportOFAC("data/sdn.csv")
+defer store.Close()
+
+store.ImportJSONL("eu_sanctions.jsonl")
+persons, _ := store.LoadCached(models.ListEU)
+
 matches := screening.Screen("John Smith", persons, 0.8)
+for _, m := range matches {
+    fmt.Printf("%.2f %s\n", m.Score, m.Person.Name)
+}
+```
+
+## Architecture
+
+```
+cmd/screener/    CLI, built with cobra
+cmd/api/         REST API entrypoint
+pkg/models/      Person, Match, ScreeningResult types
+pkg/sanctions/   CSV and JSON parser, name normalization
+pkg/screening/   Jaro-Winkler fuzzy matching engine
+pkg/ingest/      Import pipeline and SQLite cache
+internal/server/ chi HTTP server, middleware, routes
 ```
 
 ## Docker
@@ -112,9 +136,21 @@ docker build -t sanctions-screener .
 docker run -p 8080:8080 sanctions-screener
 ```
 
-## Why This Exists
+## Benchmarks
 
-Sanctions screening is a critical component in AML/CFT compliance. Financial institutions must check transactions and customers against sanctions lists maintained by OFAC (US), the EU, and the UN. This tool demonstrates how to build a performant, embeddable screening engine in Go — the kind of component that powers real compliance systems.
+Screening one name against the full 5,885-entry EU sanctions list on a MacBook M-series:
+
+| Run | Time |
+|---|---|
+| 1 | 1.25s |
+| 2 | 1.11s |
+| 3 | 1.32s |
+
+With the 100-entry sample shipped in this repo, queries return in under 1ms.
+
+## Why build this
+
+Sanctions screening is part of AML compliance. Banks, payment processors, and fintechs have to check transactions and customers against OFAC, EU, and UN sanctions lists. The algorithms behind this are not complicated: it is mostly string similarity plus good list management. This repo shows what that looks like in Go.
 
 ## License
 
