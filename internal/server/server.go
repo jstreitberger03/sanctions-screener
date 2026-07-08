@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -22,16 +21,21 @@ type Config struct {
 type Server struct {
 	router *chi.Mux
 	store  *ingest.Store
+	port   int
 }
 
-func New(cfg Config) *Server {
-	s := &Server{}
-
+func New(cfg Config) (*Server, error) {
 	store, err := ingest.NewStore(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		return nil, fmt.Errorf("open store: %w", err)
 	}
-	s.store = store
+
+	port := cfg.Port
+	if port == 0 {
+		port = 8080
+	}
+
+	s := &Server{store: store, port: port}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -47,7 +51,7 @@ func New(cfg Config) *Server {
 	})
 
 	s.router = r
-	return s
+	return s, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -55,10 +59,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListenAndServe() error {
-	return http.ListenAndServe(fmt.Sprintf(":%d", cfgPort()), s.router)
+	return http.ListenAndServe(fmt.Sprintf(":%d", s.port), s.router)
 }
-
-func cfgPort() int { return 8080 }
 
 type screenRequest struct {
 	Name      string   `json:"name"`
@@ -82,20 +84,29 @@ type screenResponse struct {
 	Count          int             `json:"count"`
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	var req screenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 
@@ -106,7 +117,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	persons, err := s.loadLists(req.Lists)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -129,8 +140,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type batchRequest struct {
@@ -148,12 +158,12 @@ type batchResponse struct {
 func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	var req batchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if len(req.Names) == 0 {
-		http.Error(w, `{"error":"names array is required"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "names array is required")
 		return
 	}
 
@@ -164,7 +174,7 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	persons, err := s.loadLists(req.Lists)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -201,8 +211,7 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 		TotalMatches:  totalMatches,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type listEntry struct {
@@ -227,8 +236,7 @@ func (s *Server) handleLists(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
@@ -237,12 +245,11 @@ func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
 
 	persons, err := s.store.LoadCached(listType)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"list":  id,
 		"count": len(persons),
 	})

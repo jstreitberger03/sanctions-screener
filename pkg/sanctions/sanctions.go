@@ -186,8 +186,10 @@ func openSanctionsToPerson(raw map[string]any) *models.Person {
 		roles = append(roles, "entity")
 	}
 
+	id, _ := raw["id"].(string)
+
 	return &models.Person{
-		ID:          raw["id"].(string),
+		ID:          id,
 		Name:        name,
 		Aliases:     aliases,
 		Nationality: nationality,

@@ -20,10 +20,13 @@ func setupTestServer(t *testing.T) (*server.Server, string) {
 	tmpFile.Close()
 	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
-	srv := server.New(server.Config{
+	srv, err := server.New(server.Config{
 		Port:   0,
 		DBPath: tmpFile.Name(),
 	})
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
 	return srv, tmpFile.Name()
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 	"github.com/jstreitberger03/sanctions-screener/pkg/sanctions"
@@ -107,6 +108,11 @@ func (s *Store) LoadCached(list models.ListType) ([]models.Person, error) {
 		}
 		if rolesStr != "" {
 			json.Unmarshal([]byte(rolesStr), &p.Roles)
+		}
+		if dobStr != "" {
+			if dob, err := time.Parse("2006-01-02", dobStr); err == nil {
+				p.DOB = &dob
+			}
 		}
 
 		persons = append(persons, p)

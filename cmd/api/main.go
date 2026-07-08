@@ -19,10 +19,13 @@ func main() {
 		dbPath = d
 	}
 
-	srv := server.New(server.Config{
+	srv, err := server.New(server.Config{
 		Port:   port,
 		DBPath: dbPath,
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	log.Printf("screener API listening on :%d\n", port)
 	if err := srv.ListenAndServe(); err != nil {

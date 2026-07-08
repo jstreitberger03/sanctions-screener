@@ -171,13 +171,38 @@ func initialsMatch(input, initials string) bool {
 
 func expandInitials(initials, fullName string) string {
 	parts := strings.Fields(fullName)
+	if len(initials) == 0 || len(parts) == 0 {
+		return fullName
+	}
+
+	used := make(map[int]bool)
 	var expanded []string
+	initRunes := []rune(initials)
+
+	for _, ir := range initRunes {
+		found := false
+		for i, p := range parts {
+			if used[i] || len(p) == 0 {
+				continue
+			}
+			firstRune := []rune(p)[0]
+			if unicode.ToLower(ir) == unicode.ToLower(firstRune) {
+				expanded = append(expanded, p)
+				used[i] = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			expanded = append(expanded, string(ir))
+		}
+	}
+
 	for i, p := range parts {
-		if i < len(initials) {
-			expanded = append(expanded, p)
-		} else {
+		if !used[i] {
 			expanded = append(expanded, p)
 		}
 	}
+
 	return strings.Join(expanded, " ")
 }

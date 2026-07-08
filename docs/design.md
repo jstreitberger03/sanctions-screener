@@ -1,4 +1,4 @@
-# Design: aml-screener
+# Design: sanctions-screener
 
 **Date:** 2026-07-08
 **Goal:** GitHub profile showcase — Go-based sanctions screening library, CLI, and API
@@ -6,12 +6,12 @@
 
 ## Overview
 
-`aml-screener` is a Go module that screens names against OFAC/EU/UN sanctions lists. It ships as three consumption modes: a library (`pkg/`), a CLI (`cmd/screener/`), and a REST API (`cmd/api/`). The project follows standard Go conventions (`cmd/pkg` layout) to demonstrate production-grade Go architecture.
+`sanctions-screener` is a Go module that screens names against OFAC/EU/UN sanctions lists. It ships as three consumption modes: a library (`pkg/`), a CLI (`cmd/screener/`), and a REST API (`cmd/api/`). The project follows standard Go conventions (`cmd/pkg` layout) to demonstrate production-grade Go architecture.
 
 ## Repository Structure
 
 ```
-aml-screener/
+sanctions-screener/
 ├── cmd/
 │   ├── screener/          # CLI entrypoint (cobra)
 │   └── api/               # REST API server entrypoint

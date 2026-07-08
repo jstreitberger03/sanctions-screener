@@ -12,21 +12,26 @@ $ screener ingest --source json --data data/eu_sample.json
 Imported 100 entries from json
 
 $ screener screen --name "Irina Kostenko"
-[0.85] Iryna Anatolijivna KOSTENKO (fuzzy) -- EU
-1 match found
+[0.85] Ірина Анатоліївна КОСТЕНКО (fuzzy) -- EU
+1 match found (threshold: 0.80)
 
 $ screener screen --name "Vitaly Kulikov"
 [1.00] Vitaly KULIKOV (exact) -- EU
-[0.86] Vitalii Iurievich KUZMENKO (fuzzy) -- EU
-3 matches found
+[0.86] Виталий Юрьевич КУЗЬМЕНКО (fuzzy) -- EU
+[0.85] Виталий Олегович ВЛАСОВ (fuzzy) -- EU
+3 matches found (threshold: 0.80)
 
-$ screener screen --name "Sberbank"
-[1.00] Sberbank (exact) -- EU
-1 match found
+$ screener screen --name "Vladimir Putin"
+[0.84] Владимир Геннадьевич ПАКРЕЕВ (fuzzy) -- EU
+[0.82] Vladimir Evgenievich MOSHKIN (fuzzy) -- EU
+2 matches found (threshold: 0.80)
 
 $ screener screen --file names.csv
-[0.85] Irina Kostenko matched Iryna Anatolijivna KOSTENKO (fuzzy)
+[0.85] Irina Kostenko matched Ірина Анатоліївна КОСТЕНКО (fuzzy)
 [1.00] Vitaly Kulikov matched Vitaly KULIKOV (exact)
+[0.86] Vitaly Kulikov matched Виталий Юрьевич КУЗЬМЕНКО (fuzzy)
+[0.85] Vitaly Kulikov matched Виталий Олегович ВЛАСОВ (fuzzy)
+[0.84] Vladimir Putin matched Владимир Геннадьевич ПАКРЕЕВ (fuzzy)
 [0.82] Vladimir Putin matched Vladimir Evgenievich MOSHKIN (fuzzy)
 
 6 total matches from 4 names
@@ -138,7 +143,7 @@ curl -X POST http://localhost:8080/api/v1/screen \
 {
   "matches": [{
     "person_id": "NK-23dinXRmxTu4sehASYNAGE",
-    "name": "Iryna Anatolijivna KOSTENKO",
+    "name": "Ірина Анатоліївна КОСТЕНКО",
     "score": 0.85,
     "match_type": "fuzzy",
     "list": "EU"

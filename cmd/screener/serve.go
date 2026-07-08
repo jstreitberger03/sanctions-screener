@@ -11,10 +11,13 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the screening API server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		srv := server.New(server.Config{
+		srv, err := server.New(server.Config{
 			Port:   port,
 			DBPath: "sanctions.db",
 		})
+		if err != nil {
+			return err
+		}
 		fmt.Printf("Starting API server on :%d\n", port)
 		return srv.ListenAndServe()
 	},
