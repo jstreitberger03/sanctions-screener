@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -108,6 +109,7 @@ func parseJSON(data []byte) ([]models.Person, error) {
 		}
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			log.Printf("skipping unparseable line: %v", err)
 			continue
 		}
 		schema, _ := raw["schema"].(string)

@@ -6,10 +6,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("screener v0.1.0")
+		fmt.Printf("screener %s (commit %s, built %s)\n", Version, Commit, BuildDate)
 	},
 }

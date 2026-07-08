@@ -1,9 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +45,7 @@ func New(cfg Config) (*Server, error) {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.RequestSize(1 << 20))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.handleHealth)
@@ -59,7 +64,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListenAndServe() error {
-	return http.ListenAndServe(fmt.Sprintf(":%d", s.port), s.router)
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", s.port),
+		Handler: s.router,
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-quit:
+		fmt.Printf("\nshutting down (%v)...\n", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			s.store.Close()
+			return fmt.Errorf("shutdown: %w", err)
+		}
+		return s.store.Close()
+	}
 }
 
 type screenRequest struct {
@@ -117,7 +147,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	persons, err := s.loadLists(req.Lists)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to load sanctions lists")
 		return
 	}
 
@@ -127,17 +157,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 		InputName:     req.Name,
 		ScreeningTime: time.Since(start).Milliseconds(),
 		Count:         len(matches),
-	}
-
-	for _, m := range matches {
-		resp.Matches = append(resp.Matches, matchResponse{
-			PersonID:    m.Person.ID,
-			Name:        m.Person.Name,
-			Score:       m.Score,
-			MatchType:   string(m.MatchType),
-			List:        string(m.Person.ListType),
-			Nationality: m.Person.Nationality,
-		})
+		Matches:       toMatchResponses(matches),
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -174,7 +194,7 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	persons, err := s.loadLists(req.Lists)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to load sanctions lists")
 		return
 	}
 
@@ -185,24 +205,11 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 		matches := screening.Screen(name, persons, req.Threshold)
 		totalMatches += len(matches)
 
-		sr := screenResponse{
-			InputName:     name,
-			ScreeningTime: 0,
-			Count:         len(matches),
-		}
-
-		for _, m := range matches {
-			sr.Matches = append(sr.Matches, matchResponse{
-				PersonID:    m.Person.ID,
-				Name:        m.Person.Name,
-				Score:       m.Score,
-				MatchType:   string(m.MatchType),
-				List:        string(m.Person.ListType),
-				Nationality: m.Person.Nationality,
-			})
-		}
-
-		results = append(results, sr)
+		results = append(results, screenResponse{
+			InputName: name,
+			Count:     len(matches),
+			Matches:   toMatchResponses(matches),
+		})
 	}
 
 	resp := batchResponse{
@@ -245,7 +252,7 @@ func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
 
 	persons, err := s.store.LoadCached(listType)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusNotFound, "list not found")
 		return
 	}
 
@@ -253,6 +260,21 @@ func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
 		"list":  id,
 		"count": len(persons),
 	})
+}
+
+func toMatchResponses(matches []models.Match) []matchResponse {
+	resp := make([]matchResponse, 0, len(matches))
+	for _, m := range matches {
+		resp = append(resp, matchResponse{
+			PersonID:    m.Person.ID,
+			Name:        m.Person.Name,
+			Score:       m.Score,
+			MatchType:   string(m.MatchType),
+			List:        string(m.Person.ListType),
+			Nationality: m.Person.Nationality,
+		})
+	}
+	return resp
 }
 
 func (s *Server) loadLists(listNames []string) ([]models.Person, error) {
@@ -267,7 +289,11 @@ func (s *Server) loadLists(listNames []string) ([]models.Person, error) {
 	}
 
 	if len(all) == 0 {
-		all, _ = s.store.LoadCached(models.ListOFAC)
+		var err error
+		all, err = s.store.LoadCached(models.ListOFAC)
+		if err != nil {
+			return nil, fmt.Errorf("load default list: %w", err)
+		}
 	}
 
 	return all, nil

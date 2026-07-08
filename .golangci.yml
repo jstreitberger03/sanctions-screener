@@ -1,0 +1,25 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - prealloc
+    - whitespace
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/jstreitberger03/sanctions-screener
+  misspell:
+    locale: US
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

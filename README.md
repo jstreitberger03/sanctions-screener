@@ -1,6 +1,7 @@
 # sanctions-screener
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![CI](https://github.com/jstreitberger03/sanctions-screener/actions/workflows/ci.yml/badge.svg)](https://github.com/jstreitberger03/sanctions-screener/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Go library and CLI for screening names against sanctions lists. Supports OFAC, EU consolidated list, and UN sanctions. Ships as a Go package, a command line tool, and a REST API.
@@ -178,6 +179,19 @@ pkg/sanctions/   CSV/JSON/JSONL parser, name normalization
 pkg/screening/   Jaro-Winkler fuzzy matching engine
 pkg/ingest/      Import pipeline, SQLite cache
 internal/server/ chi HTTP server, middleware, routes
+```
+
+```mermaid
+flowchart LR
+    CLI[CLI / screener] -->|cobra| INGEST[Ingest Pipeline]
+    CLI -->|cobra| SCREEN[Screening Engine]
+    REST[REST API] -->|chi| SERVER[HTTP Server]
+    SERVER --> SCREEN
+    INGEST --> PARSER[Sanctions Parser]
+    PARSER --> CACHE[(SQLite Cache)]
+    SCREEN --> CACHE
+    SCREEN --> JW[Jaro-Winkler]
+    JW --> RESULT[Match Results]
 ```
 
 ## Docker
