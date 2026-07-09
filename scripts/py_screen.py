@@ -5,6 +5,8 @@ Direct port of pkg/screening/screening.go for benchmark comparison.
 Usage:
     python3 scripts/py_screen.py data/eu_sample.json
     python3 scripts/py_screen.py data/eu_sample.json --name "Irina Kostenko"
+    python3 scripts/py_screen.py eu_sanctions.jsonl --jsonl
+    python3 scripts/py_screen.py eu_sanctions.jsonl --jsonl --name "Irina Kostenko"
 """
 
 import json
@@ -125,13 +127,43 @@ def load_persons(path):
     return data
 
 
+def load_persons_jsonl(path):
+    """Parse OpenSanctions JSONL into simple Person dicts."""
+    persons = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entity = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            props = entity.get("properties") or {}
+            name = props.get("name", props.get("caption", []))
+            if isinstance(name, list):
+                name = name[0] if name else ""
+            if not name:
+                continue
+            aliases = props.get("alias", props.get("previousName", []))
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            persons.append({"name": name, "aliases": aliases})
+    return persons
+
+
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: python3 {sys.argv[0]} <json_file> [--name NAME]")
+        print(f"Usage: python3 {sys.argv[0]} <file> [--jsonl] [--name NAME]")
         sys.exit(1)
 
     path = sys.argv[1]
-    persons = load_persons(path)
+    use_jsonl = "--jsonl" in sys.argv
+
+    if use_jsonl:
+        persons = load_persons_jsonl(path)
+    else:
+        persons = load_persons(path)
     print(f"Loaded {len(persons)} entries from {path}")
 
     name = None
