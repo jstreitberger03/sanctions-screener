@@ -12,6 +12,24 @@ import (
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 )
 
+// diacriticReplacer strips common diacritics. Created once at package init to avoid
+// the expensive trie construction inside the hot path of Normalize.
+var diacriticReplacer = strings.NewReplacer(
+	"ä", "a", "ö", "o", "ü", "u", "ß", "ss",
+	"á", "a", "à", "a", "â", "a", "ã", "a",
+	"é", "e", "è", "e", "ê", "e", "ë", "e",
+	"í", "i", "ì", "i", "î", "i", "ï", "i",
+	"ó", "o", "ò", "o", "ô", "o", "õ", "o",
+	"ú", "u", "ù", "u", "û", "u",
+	"ý", "y", "ÿ", "y",
+	"ñ", "n", "ç", "c",
+	"ă", "a", "ą", "a", "ć", "c", "č", "c",
+	"ď", "d", "đ", "d", "ę", "e", "ě", "e",
+	"ğ", "g", "ı", "i", "ł", "l", "ń", "n",
+	"ň", "n", "ř", "r", "ś", "s", "š", "s",
+	"ţ", "t", "ť", "t", "ž", "z",
+)
+
 type Format string
 
 const (
@@ -23,22 +41,7 @@ const (
 func Normalize(name string) string {
 	name = strings.ToLower(name)
 	name = strings.TrimSpace(name)
-	replacer := strings.NewReplacer(
-		"ä", "a", "ö", "o", "ü", "u", "ß", "ss",
-		"á", "a", "à", "a", "â", "a", "ã", "a",
-		"é", "e", "è", "e", "ê", "e", "ë", "e",
-		"í", "i", "ì", "i", "î", "i", "ï", "i",
-		"ó", "o", "ò", "o", "ô", "o", "õ", "o",
-		"ú", "u", "ù", "u", "û", "u",
-		"ý", "y", "ÿ", "y",
-		"ñ", "n", "ç", "c",
-		"ă", "a", "ą", "a", "ć", "c", "č", "c",
-		"ď", "d", "đ", "d", "ę", "e", "ě", "e",
-		"ğ", "g", "ı", "i", "ł", "l", "ń", "n",
-		"ň", "n", "ř", "r", "ś", "s", "š", "s",
-		"ţ", "t", "ť", "t", "ž", "z",
-	)
-	name = replacer.Replace(name)
+	name = diacriticReplacer.Replace(name)
 	return name
 }
 

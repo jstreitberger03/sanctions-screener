@@ -21,7 +21,7 @@ var screenCmd = &cobra.Command{
 	Use:   "screen",
 	Short: "Screen a name or file against sanctions lists",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		store, err := ingest.NewStore("sanctions.db")
+		store, err := ingest.NewStore(dbPath)
 		if err != nil {
 			return fmt.Errorf("open store: %w", err)
 		}

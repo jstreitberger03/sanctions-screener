@@ -35,8 +35,6 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the screening API server",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dbPath := "sanctions.db"
-
 		if config != "" {
 			cfg, err := loadConfig(config)
 			if err != nil {
@@ -45,7 +43,7 @@ var serveCmd = &cobra.Command{
 			if cfg.Server.Port != 0 && port == 8080 {
 				port = cfg.Server.Port
 			}
-			if cfg.Server.DBPath != "" {
+			if cfg.Server.DBPath != "" && dbPath == "sanctions.db" {
 				dbPath = cfg.Server.DBPath
 			}
 		}

@@ -13,6 +13,7 @@ var (
 	output    string
 	port      int
 	config    string
+	dbPath    string
 )
 
 func main() {
@@ -45,4 +46,6 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "API server port")
 	serveCmd.Flags().StringVarP(&config, "config", "c", "", "Config file path")
+
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "sanctions.db", "Path to SQLite database")
 }

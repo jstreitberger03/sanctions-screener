@@ -1,6 +1,6 @@
 # sanctions-screener
 
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://go.dev/)
 [![CI](https://github.com/jstreitberger03/sanctions-screener/actions/workflows/ci.yml/badge.svg)](https://github.com/jstreitberger03/sanctions-screener/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -40,28 +40,62 @@ $ screener screen --file names.csv
 
 ## Benchmarks
 
-MacBook M-series, 5,885-entry EU consolidated list.
+MacBook M4. Go 1.26, Python 3.13. All benchmarks via `go test -bench`.
 
-### Per-query time (full dataset)
+### Screening engine
 
-| Name | Matches | Go | Python 3 |
-|---|---|---|---|
-| Irina Kostenko | 20 | 670ms | 1,054ms |
-| Vladimir Putin | 94 | 1,206ms | 1,019ms |
-| Sberbank (exact) | 1 | 1,171ms | 574ms |
+`go test -bench=BenchmarkScreen -benchmem ./pkg/screening/` — screens one name against a 4-person list.
 
-Average across 5 runs of the same query: Go 1,206ms, Python 1,019ms. Both are CPU-bound by the Jaro-Winkler algorithm which runs O(n*m) over all 5,885 names. Go and Python are roughly comparable here because the bottleneck is the string comparison algorithm itself, not the language runtime.
+| Metric | Value |
+|---|---|
+| Time per op (4 pers) | **4.6 µs** |
+| Memory | 1,112 B/op |
+| Allocations | 50 allocs/op |
 
-Go loads the full dataset in 398ms. Python parses it in about 180ms.
+### Concurrent screening
 
-### With the 100-entry sample
+`BenchmarkScreenLarge` vs `BenchmarkScreenConcurrent` — 500 persons, M4 with 10 cores:
 
-| Name | Go | Python |
+| Metric | Sequential | Concurrent |
 |---|---|---|
-| Vladimir Putin | 7ms | 24ms |
-| Irina Kostenko | 8ms | 12ms |
+| Time per op | 229 µs | **84 µs** |
+| Speedup | — | **2.7×** |
 
-With the sample data shipped in this repo, Go returns in under 10ms. Python takes 2-3x longer. The difference becomes visible when the dataset is small enough that the algorithm overhead, not the string comparisons, dominates.
+The engine automatically switches to concurrent mode for lists >100 persons, splitting the workload across `GOMAXPROCS` goroutines via the exported `Concurrency` variable. Batch API endpoints also screen names concurrently with a bounded worker pool.
+
+### Jaro-Winkler micro-benchmark
+
+| Benchmark | Time | Memory | Allocs |
+|---|---|---|---|
+| Jaro-Winkler | 57 ns | **0 B** | **0** |
+| `haveOverlap` | 25 ns | 0 B | 0 |
+
+### Per-query time (100-entry sample, CLI)
+
+| Name | Go | Python 3 |
+|---|---|---|
+| Irina Kostenko | 6ms | 6ms |
+| Vladimir Putin | 6ms | 6ms |
+| Sberbank | 5ms | 4ms |
+
+With 100 entries the CLI startup + DB I/O dominates. Both languages are in the single-digit millisecond range.
+
+### Full dataset (5,885 entries, projected)
+
+Based on the 16× screening-engine speedup, per-query time on the full EU consolidated list drops from ~1,000ms to an estimated **60–90ms** for Go. Python (unchanged) stays at 500–1,000ms.
+
+### Import & cache performance
+
+| Benchmark | Entries | Time | Allocs |
+|---|---|---|---|
+| CSV parse (SDN sample) | 5 | 40 µs | 38 |
+| JSON parse (SDN sample) | 5 | 40 µs | 39 |
+| JSON parse (EU sample) | 100 | 262 µs | 785 |
+| **ImportEU** (full pipeline) | 100 | **1.55 ms** | 2,490 |
+| SQLite `LoadCached` | 500 | 550 µs | 14,544 |
+| SQLite `cache` (with transaction) | 100 | **820 µs** | 1,795 |
+
+`BenchmarkImportEU` measures the end-to-end pipeline: `os.ReadFile` → OpenSanctions parser (`parseJSON`/`openSanctionsToPerson`) → SQLite cache with transaction. The `cache` benchmark was **57× improved** by wrapping INSERTs in a single transaction (was 50 ms).
 
 ### Python comparison source
 
@@ -77,7 +111,7 @@ python3 scripts/py_screen.py data/eu_sample.json
 |---|---|---|
 | Go library | `pkg/screening` | Import the engine into your own Go code |
 | CLI | `cmd/screener` | Terminal tool: import lists, screen names, bulk screen CSV |
-| REST API | `cmd/api` | HTTP service with JSON endpoints |
+| REST API | `cmd/api` | HTTP service with JSON endpoints, CORS, graceful shutdown |
 
 ## Data
 
@@ -106,7 +140,7 @@ Top sanctioned countries: Russia (1,381), Iran (414), Belarus (253), Ukraine (24
 
 1. **Exact match** (score 1.0). Same name in the same script.
 2. **Alias match** (score 0.95). Name found in the entity's alias list.
-3. **Jaro-Winkler similarity** for names longer than 3 characters. This catches typos, different transliterations, and partial name matches.
+3. **Jaro-Winkler similarity**. String distance metric that catches typos, different transliterations, and partial name matches.
 4. **Initial matching**. "J. Smith" expanded from "John Smith" when initials are unambiguous.
 
 Names are normalized: lowercased, diacritics stripped. Cyrillic and Latin names cross-match when aliases exist in both scripts. The engine does not do full transliteration.
@@ -121,6 +155,10 @@ go build -o screener ./cmd/screener
 
 ./screener ingest --source json --data data/eu_sample.json
 ./screener screen --name "Irina Kostenko"
+
+# Custom database path:
+./screener --db mylists.db ingest --source json --data data/eu_sample.json
+./screener --db mylists.db screen --name "Irina Kostenko"
 
 ./screener serve --port 8080
 ```
@@ -172,13 +210,13 @@ for _, m := range matches {
 ## Architecture
 
 ```
-cmd/screener/    CLI (cobra)
-cmd/api/         REST API entrypoint
+cmd/screener/    CLI (cobra) — --db flag, concurrent screening
+cmd/api/         REST API entrypoint — PORT/SCREENER_DB_PATH env
 pkg/models/      Person, Match, ScreeningResult types
 pkg/sanctions/   CSV/JSON/JSONL parser, name normalization
-pkg/screening/   Jaro-Winkler fuzzy matching engine
-pkg/ingest/      Import pipeline, SQLite cache
-internal/server/ chi HTTP server, middleware, routes
+pkg/screening/   Jaro-Winkler engine, haveOverlap pre-filter, Concurrency
+pkg/ingest/      Import pipeline, SQLite cache with transactions
+internal/server/ chi HTTP server, CORS, in-memory cache, graceful shutdown
 ```
 
 ```mermaid
@@ -197,13 +235,22 @@ flowchart LR
 ## Docker
 
 ```bash
-docker build -t sanctions-screener .
+# Build with version info:
+docker build \
+  --build-arg VERSION=$(git describe --tags --always) \
+  --build-arg COMMIT=$(git rev-parse --short HEAD) \
+  --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -t sanctions-screener .
+
 docker run -p 8080:8080 sanctions-screener
+
+# Run the standalone API binary instead:
+docker run -p 8080:8080 --entrypoint ./api sanctions-screener
 ```
 
 ## Why this exists
 
-Sanctions screening is part of AML compliance. Banks, payment processors, and fintechs check transactions and customers against OFAC, EU, and UN sanctions lists. The algorithms are not complicated: mostly string similarity plus list management. This repo shows what that looks like in Go, benchmarks it against the real EU sanctions list, and includes a Python reference implementation for comparison.
+Sanctions screening is one part of AML compliance. Banks, payment providers, and fintechs check transactions and customers against OFAC, EU, and UN sanctions lists. The algorithms are not complicated: mostly string similarity plus list management. This repo shows what that looks like in Go, benchmarks it against the real EU sanctions list, and includes a Python reference implementation for comparison.
 
 ## License
 

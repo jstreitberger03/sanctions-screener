@@ -59,3 +59,36 @@ func TestLoadJSON(t *testing.T) {
 		t.Errorf("expected Mohammed Al-Rashid, got %s", persons[0].Name)
 	}
 }
+
+func BenchmarkNormalize(b *testing.B) {
+	for b.Loop() {
+		sanctions.Normalize("Jöhn Smíth Müller Straße")
+	}
+}
+
+func BenchmarkLoadCSV(b *testing.B) {
+	for b.Loop() {
+		_, err := sanctions.Load("../../data/sdn_sample.csv", sanctions.FormatCSV)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLoadJSON(b *testing.B) {
+	for b.Loop() {
+		_, err := sanctions.Load("../../data/sdn_sample.json", sanctions.FormatJSON)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLoadEU(b *testing.B) {
+	for b.Loop() {
+		_, err := sanctions.Load("../../data/eu_sample.json", sanctions.FormatJSON)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

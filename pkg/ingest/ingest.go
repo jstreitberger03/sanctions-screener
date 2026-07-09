@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -104,10 +105,14 @@ func (s *Store) LoadCached(list models.ListType) ([]models.Person, error) {
 		p.ListType = models.ListType(listTypeStr)
 
 		if aliasesStr != "" {
-			json.Unmarshal([]byte(aliasesStr), &p.Aliases)
+			if err := json.Unmarshal([]byte(aliasesStr), &p.Aliases); err != nil {
+				log.Printf("unmarshal aliases for %s: %v", p.ID, err)
+			}
 		}
 		if rolesStr != "" {
-			json.Unmarshal([]byte(rolesStr), &p.Roles)
+			if err := json.Unmarshal([]byte(rolesStr), &p.Roles); err != nil {
+				log.Printf("unmarshal roles for %s: %v", p.ID, err)
+			}
 		}
 		if dobStr != "" {
 			if dob, err := time.Parse("2006-01-02", dobStr); err == nil {
@@ -122,7 +127,13 @@ func (s *Store) LoadCached(list models.ListType) ([]models.Person, error) {
 }
 
 func (s *Store) cache(persons []models.Person) error {
-	stmt, err := s.db.Prepare(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() // no-op after Commit
+
+	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO sanctions_list
 		(id, name, aliases, dob, nationality, list_type, roles)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -133,8 +144,14 @@ func (s *Store) cache(persons []models.Person) error {
 	defer stmt.Close()
 
 	for _, p := range persons {
-		aliasesJSON, _ := json.Marshal(p.Aliases)
-		rolesJSON, _ := json.Marshal(p.Roles)
+		aliasesJSON, err := json.Marshal(p.Aliases)
+		if err != nil {
+			return fmt.Errorf("marshal aliases for %s: %w", p.ID, err)
+		}
+		rolesJSON, err := json.Marshal(p.Roles)
+		if err != nil {
+			return fmt.Errorf("marshal roles for %s: %w", p.ID, err)
+		}
 
 		var dobStr string
 		if p.DOB != nil {
@@ -146,5 +163,5 @@ func (s *Store) cache(persons []models.Person) error {
 		}
 	}
 
-	return nil
+	return tx.Commit()
 }

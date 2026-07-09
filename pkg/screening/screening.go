@@ -1,8 +1,10 @@
 package screening
 
 import (
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
@@ -10,12 +12,24 @@ import (
 )
 
 const (
-	minScoreExact   = 1.0
-	minScoreAlias   = 0.95
-	shortNameLength = 3
+	minScoreExact      = 1.0
+	minScoreAlias      = 0.95
+	minConcurrentSize  = 100 // split list into goroutines above this threshold
 )
 
+// Concurrency controls how many goroutines are used for concurrent screening.
+// Defaults to GOMAXPROCS. Set to 1 to disable concurrency entirely.
+var Concurrency = runtime.GOMAXPROCS(0)
+
 func Screen(name string, list []models.Person, threshold float64) []models.Match {
+	if len(list) <= minConcurrentSize {
+		return screenSequential(name, list, threshold)
+	}
+	return screenConcurrent(name, list, threshold)
+}
+
+// screenSequential is the single-threaded screening path for small lists.
+func screenSequential(name string, list []models.Person, threshold float64) []models.Match {
 	normalized := sanctions.Normalize(name)
 	var matches []models.Match
 
@@ -26,40 +40,126 @@ func Screen(name string, list []models.Person, threshold float64) []models.Match
 		}
 	}
 
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].Score > matches[j].Score
-	})
+	if len(matches) > 1 {
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].Score > matches[j].Score
+		})
+	}
 
 	return matches
 }
 
+// screenConcurrent splits the list across Concurrency goroutines, each
+// screening its chunk independently, then merges results via a channel.
+func screenConcurrent(name string, list []models.Person, threshold float64) []models.Match {
+	n := Concurrency
+	if n < 1 {
+		n = 1
+	}
+	chunkSize := (len(list) + n - 1) / n
+
+	type result struct {
+		matches []models.Match
+		index   int
+	}
+	ch := make(chan result, n)
+	var wg sync.WaitGroup
+
+	for i := range n {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(list) {
+			end = len(list)
+		}
+		if start >= end {
+			break
+		}
+
+		wg.Add(1)
+		go func(idx int, chunk []models.Person) {
+			defer wg.Done()
+			ch <- result{matches: screenSequential(name, chunk, threshold), index: idx}
+		}(i, list[start:end])
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	// Collect results ordered by chunk index, then merge.
+	results := make([][]models.Match, n)
+	for r := range ch {
+		results[r.index] = r.matches
+	}
+
+	var all []models.Match
+	for _, m := range results {
+		all = append(all, m...)
+	}
+
+	if len(all) > 1 {
+		sort.Slice(all, func(i, j int) bool {
+			return all[i].Score > all[j].Score
+		})
+	}
+
+	return all
+}
+
 func matchPerson(normalized, input string, person models.Person, threshold float64) *models.Match {
+	normName := sanctions.Normalize(person.Name)
+
+	// 1. Exact match on primary name (string equality, not JW score)
+	if normName == normalized {
+		return &models.Match{
+			Person:    person,
+			Score:     minScoreExact,
+			MatchType: models.MatchExact,
+			InputName: input,
+		}
+	}
+
+	// Pre-normalize aliases once for both exact and fuzzy checks
+	normAliases := make([]string, len(person.Aliases))
+	for i, alias := range person.Aliases {
+		normAliases[i] = sanctions.Normalize(alias)
+	}
+
+	// 2. Exact match on alias (respects threshold — no fuzzy fallback)
+	for _, normAlias := range normAliases {
+		if normAlias == normalized {
+			if minScoreAlias >= threshold {
+				return &models.Match{
+					Person:    person,
+					Score:     minScoreAlias,
+					MatchType: models.MatchAlias,
+					InputName: input,
+				}
+			}
+			return nil
+		}
+	}
+
+	// 3. Fuzzy matching via Jaro-Winkler
 	bestScore := 0.0
 	bestType := models.MatchFuzzy
 
-	if score := jaroWinkler(normalized, sanctions.Normalize(person.Name)); score > bestScore {
-		bestScore = score
-	}
-
-	for _, alias := range person.Aliases {
-		if score := jaroWinkler(normalized, sanctions.Normalize(alias)); score > bestScore {
+	if haveOverlap(normalized, normName) {
+		if score := jaroWinkler(normalized, normName); score > bestScore {
 			bestScore = score
 		}
 	}
 
-	if bestScore >= minScoreExact {
-		bestType = models.MatchExact
-		bestScore = minScoreExact
-	}
-
-	for _, alias := range person.Aliases {
-		if sanctions.Normalize(alias) == normalized {
-			bestScore = minScoreAlias
-			bestType = models.MatchAlias
-			break
+	for _, normAlias := range normAliases {
+		if haveOverlap(normalized, normAlias) {
+			if score := jaroWinkler(normalized, normAlias); score > bestScore {
+				bestScore = score
+			}
 		}
 	}
 
+	// 4. Initial matching (e.g. "J. Smith" → "John Smith")
 	initials := extractInitials(person.Name)
 	if initials != "" && initialsMatch(normalized, initials) {
 		if s := jaroWinkler(normalized, sanctions.Normalize(expandInitials(initials, person.Name))); s > bestScore {
@@ -78,6 +178,32 @@ func matchPerson(normalized, input string, person models.Person, threshold float
 		MatchType: bestType,
 		InputName: input,
 	}
+}
+
+// haveOverlap returns true if the two strings could share at least one
+// character. Uses an ASCII byte bitmap for speed; when both strings are
+// pure non-ASCII (e.g. Cyrillic), returns true conservatively.
+func haveOverlap(a, b string) bool {
+	hasASCIIa, hasASCIIb := false, false
+	var seen [128]bool
+	for i := range len(a) {
+		if a[i] < 128 {
+			seen[a[i]] = true
+			hasASCIIa = true
+		}
+	}
+	for i := range len(b) {
+		if b[i] < 128 {
+			hasASCIIb = true
+			if seen[b[i]] {
+				return true
+			}
+		}
+	}
+	if hasASCIIa != hasASCIIb {
+		return false
+	}
+	return !hasASCIIa
 }
 
 func jaroWinkler(s1, s2 string) float64 {
@@ -166,7 +292,8 @@ func extractInitials(name string) string {
 
 func initialsMatch(input, initials string) bool {
 	normalized := sanctions.Normalize(initials)
-	return strings.HasPrefix(input, normalized) || jaroWinkler(input, normalized) >= 0.9
+	return strings.HasPrefix(input, normalized) ||
+		(haveOverlap(input, normalized) && jaroWinkler(input, normalized) >= 0.9)
 }
 
 func expandInitials(initials, fullName string) string {

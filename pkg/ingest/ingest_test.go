@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,13 +9,13 @@ import (
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 )
 
-func tempDB(t *testing.T) (*Store, func()) {
-	t.Helper()
-	dir := t.TempDir()
+func tempDB(tb testing.TB) (*Store, func()) {
+	tb.Helper()
+	dir := tb.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
 	store, err := NewStore(dbPath)
 	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+		tb.Fatalf("NewStore: %v", err)
 	}
 	return store, func() {
 		store.Close()
@@ -101,5 +102,65 @@ func TestStore_Close(t *testing.T) {
 
 	if err := store.cache([]models.Person{{ID: "4", Name: "X", ListType: models.ListOFAC}}); err == nil {
 		t.Error("expected error after close")
+	}
+}
+
+func BenchmarkLoadCached(b *testing.B) {
+	store, cleanup := tempDB(b)
+	defer cleanup()
+
+	persons := benchPersons(500)
+	if err := store.cache(persons); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		_, err := store.LoadCached(models.ListOFAC)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCache(b *testing.B) {
+	persons := benchPersons(100)
+
+	for b.Loop() {
+		store, cleanup := tempDB(b)
+		err := store.cache(persons)
+		if err != nil {
+			b.Fatal(err)
+		}
+		cleanup()
+	}
+}
+
+func benchPersons(n int) []models.Person {
+	persons := make([]models.Person, n)
+	for i := range n {
+		persons[i] = models.Person{
+			ID:          fmt.Sprintf("BENCH-%d", i),
+			Name:        fmt.Sprintf("Benchmark Person %d", i),
+			Aliases:     []string{fmt.Sprintf("Alias %d", i), fmt.Sprintf("AKA %d", i)},
+			Roles:       []string{"individual"},
+			Nationality: "XX",
+			ListType:    models.ListOFAC,
+		}
+	}
+	return persons
+}
+
+// BenchmarkImportEU measures the full Read→Parse→Cache pipeline
+// using the real 100-entry EU sample in OpenSanctions format.
+// Exercises: os.ReadFile → sanctions.Load (parseJSON/openSanctionsToPerson) → cache with transaction.
+func BenchmarkImportEU(b *testing.B) {
+	for b.Loop() {
+		store, cleanup := tempDB(b)
+		_, err := store.ImportEU("../../data/eu_sample.json")
+		if err != nil {
+			b.Fatal(err)
+		}
+		cleanup()
 	}
 }

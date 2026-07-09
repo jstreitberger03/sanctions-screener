@@ -21,7 +21,7 @@ var ingestCmd = &cobra.Command{
 			return fmt.Errorf("--data is required")
 		}
 
-		store, err := ingest.NewStore("sanctions.db")
+		store, err := ingest.NewStore(dbPath)
 		if err != nil {
 			return fmt.Errorf("open store: %w", err)
 		}
