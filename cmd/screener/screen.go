@@ -32,12 +32,9 @@ var screenCmd = &cobra.Command{
 		if len(lt) == 0 {
 			lt = []string{"OFAC", "EU", "UN"}
 		}
-		for _, l := range lt {
-			persons, err := store.LoadCached(models.ListType(l))
-			if err != nil {
-				return fmt.Errorf("load list %s: %w", l, err)
-			}
-			allPersons = append(allPersons, persons...)
+		allPersons, err = store.LoadLists(lt)
+		if err != nil {
+			return fmt.Errorf("load lists %v: %w", lt, err)
 		}
 
 		if screeningFile != "" {

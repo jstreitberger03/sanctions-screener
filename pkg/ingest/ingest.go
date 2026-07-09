@@ -18,7 +18,7 @@ type Store struct {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=-2000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -83,10 +83,31 @@ func (s *Store) ImportJSON(path string) ([]models.Person, error) {
 }
 
 func (s *Store) LoadCached(list models.ListType) ([]models.Person, error) {
-	rows, err := s.db.Query(
-		"SELECT id, name, aliases, dob, nationality, list_type, roles FROM sanctions_list WHERE list_type = ?",
-		string(list),
-	)
+	return s.loadLists([]string{string(list)})
+}
+
+// LoadLists fetches persons from multiple list types in a single query.
+func (s *Store) LoadLists(lists []string) ([]models.Person, error) {
+	return s.loadLists(lists)
+}
+
+func (s *Store) loadLists(lists []string) ([]models.Person, error) {
+	if len(lists) == 0 {
+		return nil, nil
+	}
+
+	query := "SELECT id, name, aliases, dob, nationality, list_type, roles FROM sanctions_list WHERE list_type IN ("
+	args := make([]any, len(lists))
+	for i := range lists {
+		if i > 0 {
+			query += ", "
+		}
+		query += "?"
+		args[i] = lists[i]
+	}
+	query += ")"
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}

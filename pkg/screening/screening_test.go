@@ -2,8 +2,11 @@ package screening_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 	"github.com/jstreitberger03/sanctions-screener/pkg/screening"
 )
@@ -270,5 +273,52 @@ func TestConcurrentMatchesSequential(t *testing.T) {
 				i, concurrent[i].Person.ID, concurrent[i].Score,
 				sequential[i].Person.ID, sequential[i].Score)
 		}
+	}
+}
+
+// BenchmarkScreenFullDataset loads the full 5,885-entry EU sanctions list
+// from a local JSONL file and screens one name against it. Skips when the
+// file is not present (not shipped in the repo) or when running -short.
+//
+// Download the dataset first:
+//   curl -o eu_sanctions.jsonl https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
+func BenchmarkScreenFullDataset(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping full-dataset benchmark in short mode")
+	}
+
+	// Try common paths for the full dataset.
+	candidates := []string{
+		"../../eu_sanctions.jsonl",
+		"../../data/eu_full.jsonl",
+		"../../data/eu_sanctions.jsonl",
+	}
+	var dataPath string
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			dataPath = p
+			break
+		}
+	}
+	if dataPath == "" {
+		b.Skip("full dataset not found. Download: curl -o eu_sanctions.jsonl https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json")
+	}
+
+	// Import into a temp DB once, then screen in the loop.
+	store, err := ingest.NewStore(filepath.Join(b.TempDir(), "full.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+
+	persons, err := store.ImportJSONL(dataPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Logf("loaded %d persons from %s", len(persons), dataPath)
+
+	b.ResetTimer()
+	for b.Loop() {
+		screening.Screen("Irina Kostenko", persons, 0.8)
 	}
 }

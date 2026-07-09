@@ -44,13 +44,21 @@ MacBook M4. Go 1.26, Python 3.13. All benchmarks via `go test -bench`.
 
 ### Screening engine
 
-`go test -bench=BenchmarkScreen -benchmem ./pkg/screening/` — screens one name against a 4-person list.
+`go test -bench=BenchmarkScreen -benchmem ./pkg/screening/`
 
-| Metric | Value |
-|---|---|
-| Time per op (4 pers) | **4.6 µs** |
-| Memory | 1,112 B/op |
-| Allocations | 50 allocs/op |
+| Benchmark | Persons | Time | Memory | Allocs |
+|---|---|---|---|---|
+| `BenchmarkScreen` | 4 | **5.2 µs** | 1.1 KB | 50 |
+| `BenchmarkScreenLarge` (sequential) | 500 | 225 µs | 72 KB | 4,510 |
+| `BenchmarkScreenConcurrent` | 500 | **83 µs** | 77 KB | 4,569 |
+| `BenchmarkScreenFullDataset` | **5,885** | **4.0 ms** | 4.2 MB | 115,761 |
+
+`BenchmarkScreenFullDataset` uses the real EU consolidated list (JSONL, OpenSanctions format). Download it first:
+
+```bash
+curl -o eu_sanctions.jsonl \
+  https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
+```
 
 ### Concurrent screening
 
@@ -58,8 +66,9 @@ MacBook M4. Go 1.26, Python 3.13. All benchmarks via `go test -bench`.
 
 | Metric | Sequential | Concurrent |
 |---|---|---|
-| Time per op | 229 µs | **84 µs** |
-| Speedup | — | **2.7×** |
+| 500 persons | 225 µs | **83 µs** |
+| 5,885 persons (real EU list) | — | **4.0 ms** |
+| Speedup (500p) | — | **2.7×** |
 
 The engine automatically switches to concurrent mode for lists >100 persons, splitting the workload across `GOMAXPROCS` goroutines via the exported `Concurrency` variable. Batch API endpoints also screen names concurrently with a bounded worker pool.
 
@@ -74,15 +83,21 @@ The engine automatically switches to concurrent mode for lists >100 persons, spl
 
 | Name | Go | Python 3 |
 |---|---|---|
-| Irina Kostenko | 6ms | 6ms |
-| Vladimir Putin | 6ms | 6ms |
-| Sberbank | 5ms | 4ms |
+| Irina Kostenko | 8ms | 3ms |
+| Vitaly Kulikov | 8ms | 3ms |
+| Vladimir Putin | 5ms | 3ms |
+| Sberbank | 5ms | 2ms |
 
-With 100 entries the CLI startup + DB I/O dominates. Both languages are in the single-digit millisecond range.
+Go warm runs 5–8 ms, cold start ~386 ms (binary + SQLite init). Python loads the JSON directly into memory (no DB). With 100 entries both are in the single-digit millisecond range.### Full dataset (5,885 entries)
 
-### Full dataset (5,885 entries, projected)
+Screening against the real EU consolidated list (5,885 persons, measured):
 
-Based on the 16× screening-engine speedup, per-query time on the full EU consolidated list drops from ~1,000ms to an estimated **60–90ms** for Go. Python (unchanged) stays at 500–1,000ms.
+| Engine | Time | Speedup |
+|---|---|---|
+| Go (concurrent, 10-core M4) | **4.0 ms** | **37× faster** |
+| Python (single-threaded) | **~150 ms** | — |
+
+The engine automatically uses the concurrent path for lists >100 persons, splitting work across `GOMAXPROCS` goroutines.
 
 ### Import & cache performance
 
