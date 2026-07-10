@@ -238,7 +238,7 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 
 	// Sequential for small batches; parallel worker pool for large.
 	// Below batchSequentialThreshold, goroutine spawn + channel sync
-	// overhead outweighs the parallelism benefit. Above, it amortises
+	// overhead outweighs the parallelism benefit. Above, it amortizes
 	// across enough work to pay back on multi-core hosts.
 	results := make([]screenResponse, len(req.Names))
 	totalMatches := 0
