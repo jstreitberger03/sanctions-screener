@@ -1,13 +1,12 @@
 package sanctions
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
-	"time"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -65,6 +64,14 @@ func Normalize(name string) string {
 }
 
 func Load(path string, format Format) ([]models.Person, error) {
+	return LoadWithType(path, format, models.ListEU)
+}
+
+// LoadWithType works like Load but allows specifying a default list type
+// for formats that don't carry their own list metadata (e.g. FTM JSONL).
+// For formats with an explicit list field (JSON array "list" key), the
+// explicit value overrides the default.
+func LoadWithType(path string, format Format, defaultListType models.ListType) ([]models.Person, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -72,7 +79,7 @@ func Load(path string, format Format) ([]models.Person, error) {
 
 	switch format {
 	case FormatJSON, FormatJSONL:
-		return parseJSON(data)
+		return parseJSON(data, defaultListType)
 	case FormatCSV:
 		return parseCSV(strings.NewReader(string(data)))
 	default:
@@ -109,124 +116,28 @@ type simpleEntry struct {
 	Programs    flexStringSlice `json:"programs"`
 }
 
-func parseJSON(data []byte) ([]models.Person, error) {
-	if len(data) == 0 {
+func parseJSON(data []byte, defaultListType models.ListType) ([]models.Person, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
 		return nil, fmt.Errorf("empty data")
 	}
 
-	dataStr := string(data)
-	if strings.TrimSpace(dataStr)[0] == '[' {
+	if trimmed[0] == '[' {
 		var entries []simpleEntry
 		if err := json.Unmarshal(data, &entries); err != nil {
 			return nil, fmt.Errorf("parse json array: %w", err)
 		}
-		return fromSimple(entries), nil
+		return fromSimple(entries, defaultListType), nil
 	}
 
-	var persons []models.Person
-	for _, line := range strings.Split(dataStr, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var raw map[string]any
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			log.Printf("skipping unparseable line: %v", err)
-			continue
-		}
-		schema, _ := raw["schema"].(string)
-		if schema != "Person" && schema != "Organization" {
-			continue
-		}
-		p := openSanctionsToPerson(raw)
-		if p != nil {
-			persons = append(persons, *p)
-		}
-	}
-
-	return persons, nil
+	// JSONL path — delegate to the streaming typed-struct parser.
+	return parseJSONL(data, defaultListType)
 }
 
-func openSanctionsToPerson(raw map[string]any) *models.Person {
-	props, ok := raw["properties"].(map[string]any)
-	if !ok {
-		return nil
-	}
-
-	names, _ := props["name"].([]any)
-	if len(names) == 0 {
-		return nil
-	}
-	name, _ := names[0].(string)
-	if name == "" {
-		return nil
-	}
-
-	aliasesRaw, _ := props["alias"].([]any)
-	aliases := make([]string, 0, len(aliasesRaw))
-	for _, a := range aliasesRaw {
-		if s, ok := a.(string); ok {
-			aliases = append(aliases, s)
-		}
-	}
-
-	countries, _ := props["country"].([]any)
-	nationality := "unknown"
-	if len(countries) > 0 {
-		if c, ok := countries[0].(string); ok {
-			nationality = strings.ToUpper(c)
-		}
-	}
-
-	birthDate := ""
-	birthDates, _ := props["birthDate"].([]any)
-	if len(birthDates) > 0 {
-		if bd, ok := birthDates[0].(string); ok {
-			birthDate = bd
-		}
-	}
-
-	var dob *time.Time
-	if t, err := time.Parse("2006-01-02", birthDate); err == nil {
-		dob = &t
-	}
-
-	schema, _ := raw["schema"].(string)
-
-	programsRaw, _ := props["programId"].([]any)
-	roles := make([]string, 0, len(programsRaw))
-	for _, p := range programsRaw {
-		if s, ok := p.(string); ok {
-			roles = append(roles, s)
-		}
-	}
-
-	listType := models.ListEU
-
-	switch schema {
-	case "Person":
-		roles = append(roles, "individual")
-	case "Organization":
-		roles = append(roles, "entity")
-	}
-
-	id, _ := raw["id"].(string)
-
-	return &models.Person{
-		ID:          id,
-		Name:        name,
-		Aliases:     aliases,
-		Nationality: nationality,
-		ListType:    listType,
-		Roles:       roles,
-		DOB:         dob,
-	}
-}
-
-func fromSimple(entries []simpleEntry) []models.Person {
+func fromSimple(entries []simpleEntry, defaultListType models.ListType) []models.Person {
 	persons := make([]models.Person, 0, len(entries))
 	for _, e := range entries {
-		lt := models.ListEU
+		lt := defaultListType
 		if e.ListType != "" {
 			lt = models.ListType(e.ListType)
 		}

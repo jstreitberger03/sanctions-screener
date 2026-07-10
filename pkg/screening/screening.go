@@ -1,12 +1,10 @@
 package screening
 
 import (
-	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
-	"github.com/jstreitberger03/sanctions-screener/pkg/sanctions"
 )
 
 const (
@@ -22,102 +20,13 @@ const (
 
 // Screen matches an input name against a list of persons and returns
 // results scoring at or above the threshold, sorted by score descending.
+//
+// Screen builds a fresh Index on every call. For repeated screenings of the
+// same list (server path, batch), prefer BuildIndex + ScreenIndex to avoid
+// rebuilding the index per call.
 func Screen(name string, list []models.Person, threshold float64) []models.Match {
-	normalized := sanctions.Normalize(name)
-	var matches []models.Match
-
-	for _, person := range list {
-		m := matchPerson(normalized, name, person, threshold)
-		if m != nil {
-			matches = append(matches, *m)
-		}
-	}
-
-	if len(matches) > 1 {
-		sort.Slice(matches, func(i, j int) bool {
-			return matches[i].Score > matches[j].Score
-		})
-	}
-
-	return matches
-}
-
-func matchPerson(normalized, input string, person models.Person, threshold float64) *models.Match {
-	normName := sanctions.Normalize(person.Name)
-
-	// 1. Exact match on primary name (string equality, not JW score).
-	if normName == normalized {
-		return &models.Match{
-			Person:    person,
-			Score:     minScoreExact,
-			MatchType: models.MatchExact,
-			InputName: input,
-		}
-	}
-
-	// Pre-normalize aliases once for both exact and fuzzy checks.
-	normAliases := make([]string, len(person.Aliases))
-	for i, alias := range person.Aliases {
-		normAliases[i] = sanctions.Normalize(alias)
-	}
-
-	// 2. Exact match on alias (respects threshold — no fuzzy fallback).
-	for _, normAlias := range normAliases {
-		if normAlias == normalized {
-			if minScoreAlias >= threshold {
-				return &models.Match{
-					Person:    person,
-					Score:     minScoreAlias,
-					MatchType: models.MatchAlias,
-					InputName: input,
-				}
-			}
-			return nil
-		}
-	}
-
-	// 3. Fuzzy matching via Jaro-Winkler.
-	bestScore := 0.0
-	bestType := models.MatchFuzzy
-
-	if haveOverlap(normalized, normName) {
-		if score := jaroWinkler(normalized, normName); score > bestScore {
-			bestScore = score
-		}
-	}
-
-	for _, normAlias := range normAliases {
-		if haveOverlap(normalized, normAlias) {
-			if score := jaroWinkler(normalized, normAlias); score > bestScore {
-				bestScore = score
-			}
-		}
-	}
-
-	// 4. Initial matching (e.g. "J. Smith" → "John Smith").
-	if initials := extractInitials(person.Name); initials != "" {
-		normInitials := sanctions.Normalize(initials)
-		matched := strings.HasPrefix(normalized, normInitials) ||
-			(haveOverlap(normalized, normInitials) && jaroWinkler(normalized, normInitials) >= minInitialsSimilarity)
-		if matched {
-			expanded := expandInitials(initials, person.Name)
-			if s := jaroWinkler(normalized, sanctions.Normalize(expanded)); s > bestScore {
-				bestScore = s
-				bestType = models.MatchInit
-			}
-		}
-	}
-
-	if bestScore < threshold {
-		return nil
-	}
-
-	return &models.Match{
-		Person:    person,
-		Score:     bestScore,
-		MatchType: bestType,
-		InputName: input,
-	}
+	idx := BuildIndex(list)
+	return ScreenIndex(name, idx, threshold)
 }
 
 // haveOverlap returns true if the two strings could share at least one
@@ -146,12 +55,36 @@ func haveOverlap(a, b string) bool {
 	return !hasASCIIa
 }
 
+// jwScratchMax is the rune/byte length threshold for stack-allocated match
+// tracking arrays in jaroWinkler. Virtually all real-world names fit within
+// this limit; longer strings fall back to heap-allocated slices.
+const jwScratchMax = 128
+
+// isASCII returns true if all bytes of s are < 0x80 (pure ASCII). This is
+// used to select a byte-level fast path in jaroWinkler that avoids the
+// []rune conversion entirely for the ~90%+ of Western sanctions names
+// that are pure ASCII.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 // jaroWinkler computes the Jaro-Winkler similarity between two strings.
-// Operates on runes so multi-byte UTF-8 names (Cyrillic, Arabic, CJK)
-// are compared correctly.
+// For pure-ASCII inputs a byte-level fast path avoids []rune conversion.
+// For non-ASCII (Cyrillic, Arabic, CJK, etc.) a rune-based path is used so
+// that multi-byte characters are compared correctly (a multi-byte rune is
+// not accidentally split into partial byte comparisons).
 func jaroWinkler(s1, s2 string) float64 {
 	if s1 == s2 {
 		return 1.0
+	}
+
+	if isASCII(s1) && isASCII(s2) {
+		return jaroWinklerASCII(s1, s2)
 	}
 
 	r1 := []rune(s1)
@@ -161,7 +94,104 @@ func jaroWinkler(s1, s2 string) float64 {
 		return 0.0
 	}
 
-	// Prefix bonus: up to 4 matching leading characters boost the score.
+	var m1stack, m2stack [jwScratchMax]bool
+	var m1, m2 []bool
+	if len1 <= jwScratchMax && len2 <= jwScratchMax {
+		m1 = m1stack[:len1]
+		m2 = m2stack[:len2]
+	} else {
+		m1 = make([]bool, len1)
+		m2 = make([]bool, len2)
+	}
+
+	return jaroCoreRune(r1, r2, m1, m2)
+}
+
+// jaroWinklerASCII computes Jaro-Winkler on pure-ASCII strings by indexing
+// byte values directly, avoiding the []rune conversion that the rune path
+// requires. For ASCII the byte values and rune values are identical.
+func jaroWinklerASCII(s1, s2 string) float64 {
+	len1, len2 := len(s1), len(s2)
+	if len1 == 0 || len2 == 0 {
+		return 0.0
+	}
+
+	var m1stack, m2stack [jwScratchMax]bool
+	var m1, m2 []bool
+	if len1 <= jwScratchMax && len2 <= jwScratchMax {
+		m1 = m1stack[:len1]
+		m2 = m2stack[:len2]
+	} else {
+		m1 = make([]bool, len1)
+		m2 = make([]bool, len2)
+	}
+
+	prefixLen := 0
+	for i := 0; i < min(min(len1, len2), 4); i++ {
+		if s1[i] == s2[i] {
+			prefixLen++
+		} else {
+			break
+		}
+	}
+
+	matchDist := max(len1, len2)/2 - 1
+	if matchDist < 0 {
+		matchDist = 0
+	}
+
+	matches := 0
+	for i := 0; i < len1; i++ {
+		start := max(0, i-matchDist)
+		end := min(len2, i+matchDist+1)
+		for j := start; j < end; j++ {
+			if m2[j] {
+				continue
+			}
+			if s1[i] == s2[j] {
+				m1[i] = true
+				m2[j] = true
+				matches++
+				break
+			}
+		}
+	}
+
+	if matches == 0 {
+		return 0.0
+	}
+
+	transpositions := 0
+	k := 0
+	for i := 0; i < len1; i++ {
+		if !m1[i] {
+			continue
+		}
+		for !m2[k] {
+			k++
+		}
+		if s1[i] != s2[k] {
+			transpositions++
+		}
+		k++
+	}
+
+	jaro := (float64(matches)/float64(len1) +
+		float64(matches)/float64(len2) +
+		float64(matches-transpositions/2)/float64(matches)) / 3.0
+
+	return jaro + float64(prefixLen)*0.1*(1.0-jaro)
+}
+
+// jaroCoreRune computes Jaro-Winkler on fully converted []rune inputs. It is
+// shared by the rune path in jaroWinkler. s1/s2 are the rune slices and m1/m2
+// are pre-allocated boolean tracking slices (stack or heap).
+func jaroCoreRune(r1, r2 []rune, m1, m2 []bool) float64 {
+	len1, len2 := len(r1), len(r2)
+	if len1 == 0 || len2 == 0 {
+		return 0.0
+	}
+
 	prefixLen := 0
 	for i := 0; i < min(min(len1, len2), 4); i++ {
 		if r1[i] == r2[i] {
@@ -176,8 +206,14 @@ func jaroWinkler(s1, s2 string) float64 {
 		matchDist = 0
 	}
 
-	m1 := make([]bool, len1)
-	m2 := make([]bool, len2)
+	// Reset tracking slices (stack arrays are zero-valued on first use, but
+	// jaroWinkler can be called with reused heap slices — clear defensively).
+	for i := range m1 {
+		m1[i] = false
+	}
+	for i := range m2 {
+		m2[i] = false
+	}
 
 	matches := 0
 	for i := 0; i < len1; i++ {
@@ -241,7 +277,14 @@ func expandInitials(initials, fullName string) string {
 		return fullName
 	}
 
-	used := make(map[int]bool)
+	// Track used word indices without allocating a map. Name parts rarely
+	// exceed 8; for longer names the extra parts are appended below by
+	// checking the used-array boundary.
+	var usedArray [8]bool
+	used := usedArray[:]
+	if len(parts) > len(usedArray) {
+		used = make([]bool, len(parts))
+	}
 	var expanded []string
 
 	for _, ir := range initials {

@@ -43,6 +43,7 @@ func init() {
 
 	ingestCmd.Flags().StringVarP(&ingestSource, "source", "s", "ofac", "Source: ofac, eu, json")
 	ingestCmd.Flags().StringVarP(&ingestData, "data", "d", "", "Path to sanctions data file")
+	ingestCmd.Flags().StringVarP(&ingestListType, "list-type", "", "EU", "Default list type for JSONL import (OFAC, EU, UN)")
 
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "API server port")
 	serveCmd.Flags().StringVarP(&config, "config", "c", "", "Config file path")

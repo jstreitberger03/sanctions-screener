@@ -2,6 +2,7 @@ package screening
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -127,6 +128,35 @@ func TestJaroWinkler_Subset(t *testing.T) {
 func BenchmarkJaroWinkler(b *testing.B) {
 	for b.Loop() {
 		jaroWinkler("martha", "marhta")
+	}
+}
+
+// TestJaroWinkler_LongNamesFallback verifies that jaroWinkler handles names
+// longer than the stack-allocated [128]bool threshold (> 128 runes) via the
+// heap-allocated fallback path. The existing jaro_winkler_test.go vectors
+// (all ASCII, short strings) exercise the stack path. This test ensures the
+// fallback path is correct for long names that exceed it.
+func TestJaroWinkler_LongNamesFallback(t *testing.T) {
+	// 200-character strings — above the [128]bool stack threshold.
+	// Both share the same prefix and differ only in the last character.
+	s1 := strings.Repeat("abcdefgh", 25)              // 200 chars
+	s2 := strings.Repeat("abcdefgh", 24) + "abcdefgi" // 199 common chars, last differs
+	got := jaroWinkler(s1, s2)
+	// Should be very high (~0.99) but not exactly 1.0 — the strings differ.
+	if got < 0.95 || got >= 1.0 {
+		t.Errorf("long-name JW: expected ~0.95–1.0, got %.4f", got)
+	}
+
+	// 200-char string vs identical string → 1.0.
+	if got := jaroWinkler(s1, s1); got != 1.0 {
+		t.Errorf("identical long strings: expected 1.0, got %.4f", got)
+	}
+
+	// 200-char completely different strings → 0.0 (no overlap in bytes/rune chars).
+	noOverlap := strings.Repeat("a", 200)
+	noOverlap2 := strings.Repeat("b", 200)
+	if got := jaroWinkler(noOverlap, noOverlap2); got != 0.0 {
+		t.Errorf("no-char-overlap long strings: expected 0.0, got %.4f", got)
 	}
 }
 

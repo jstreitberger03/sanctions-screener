@@ -42,6 +42,7 @@ type Config struct {
 
 type cacheEntry struct {
 	persons []models.Person
+	index   *screening.Index // pre-built on cache load for O(1)-ish candidate pruning
 	loaded  time.Time
 }
 
@@ -95,6 +96,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
+// CloseStore closes the underlying store. Used by tests to simulate a broken DB.
+func (s *Server) CloseStore() error {
+	return s.store.Close()
+}
+
 func (s *Server) ListenAndServe() error {
 	defer s.store.Close()
 
@@ -127,7 +133,7 @@ func (s *Server) ListenAndServe() error {
 
 type screenRequest struct {
 	Name      string   `json:"name"`
-	Threshold float64  `json:"threshold"`
+	Threshold *float64 `json:"threshold"`
 	Lists     []string `json:"lists"`
 }
 
@@ -173,18 +179,19 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Threshold == 0 {
-		req.Threshold = 0.8
+	threshold := 0.8
+	if req.Threshold != nil {
+		threshold = *req.Threshold
 	}
 
 	start := time.Now()
-	persons, err := s.loadLists(req.Lists)
+	_, idx, err := s.loadLists(req.Lists)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load sanctions lists")
 		return
 	}
 
-	matches := screening.Screen(req.Name, persons, req.Threshold)
+	matches := screening.ScreenIndex(req.Name, idx, threshold)
 
 	resp := screenResponse{
 		InputName:     req.Name,
@@ -198,7 +205,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 
 type batchRequest struct {
 	Names     []string `json:"names"`
-	Threshold float64  `json:"threshold"`
+	Threshold *float64 `json:"threshold"`
 	Lists     []string `json:"lists"`
 }
 
@@ -225,12 +232,13 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Threshold == 0 {
-		req.Threshold = 0.8
+	threshold := 0.8
+	if req.Threshold != nil {
+		threshold = *req.Threshold
 	}
 
 	start := time.Now()
-	persons, err := s.loadLists(req.Lists)
+	_, idx, err := s.loadLists(req.Lists)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load sanctions lists")
 		return
@@ -245,7 +253,7 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Names) < batchSequentialThreshold {
 		for i, name := range req.Names {
-			matches := screening.Screen(name, persons, req.Threshold)
+			matches := screening.ScreenIndex(name, idx, threshold)
 			totalMatches += len(matches)
 			results[i] = screenResponse{
 				InputName: name,
@@ -259,9 +267,14 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 
 		for i, name := range req.Names {
 			sem <- struct{}{}
-			go func(idx int, n string) {
+			go func(iIdx int, n string) {
 				defer func() { <-sem }()
-				ch <- batchResult{index: idx, matches: screening.Screen(n, persons, req.Threshold)}
+				defer func() {
+					if r := recover(); r != nil {
+						ch <- batchResult{index: iIdx}
+					}
+				}()
+				ch <- batchResult{index: iIdx, matches: screening.ScreenIndex(n, idx, threshold)}
 			}(i, name)
 		}
 
@@ -293,10 +306,10 @@ type listEntry struct {
 
 func (s *Server) handleLists(w http.ResponseWriter, r *http.Request) {
 	lists := []models.ListType{models.ListOFAC, models.ListEU, models.ListUN}
-	var entries []listEntry
+	entries := make([]listEntry, 0)
 
 	for _, lt := range lists {
-		persons, err := s.getCachedList(lt)
+		persons, _, err := s.getCachedList(lt)
 		if err != nil {
 			log.Printf("list %s unavailable: %v", lt, err)
 			continue
@@ -315,7 +328,7 @@ func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	listType := models.ListType(id)
 
-	persons, err := s.getCachedList(listType)
+	persons, _, err := s.getCachedList(listType)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "list not found")
 		return
@@ -342,46 +355,79 @@ func toMatchResponses(matches []models.Match) []matchResponse {
 	return resp
 }
 
-func (s *Server) getCachedList(lt models.ListType) ([]models.Person, error) {
+func (s *Server) getCachedList(lt models.ListType) ([]models.Person, *screening.Index, error) {
 	s.cacheMu.RLock()
 	entry, ok := s.personCache[lt]
 	s.cacheMu.RUnlock()
 
 	if ok && time.Since(entry.loaded) < cacheTTL {
-		return entry.persons, nil
+		return entry.persons, entry.index, nil
 	}
 
 	persons, err := s.store.LoadCached(lt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	var idx *screening.Index
 	s.cacheMu.Lock()
 	// Double-check: another goroutine may have refreshed while we waited.
 	if existing, exists := s.personCache[lt]; exists && time.Since(existing.loaded) < cacheTTL {
 		persons = existing.persons
+		idx = existing.index
 	} else {
-		s.personCache[lt] = cacheEntry{persons: persons, loaded: time.Now()}
+		idx = screening.BuildIndex(persons)
+		s.personCache[lt] = cacheEntry{
+			persons: persons,
+			index:   idx,
+			loaded:  time.Now(),
+		}
 	}
 	s.cacheMu.Unlock()
 
-	return persons, nil
+	return persons, idx, nil
 }
 
-func (s *Server) loadLists(listNames []string) ([]models.Person, error) {
+func (s *Server) loadLists(listNames []string) ([]models.Person, *screening.Index, error) {
 	if len(listNames) == 0 {
 		listNames = []string{string(models.ListOFAC), string(models.ListEU), string(models.ListUN)}
 	}
 
+	// Fast path: a single list can reuse the per-list index already
+	// cached by getCachedList, avoiding a redundant BuildIndex call.
+	if len(listNames) == 1 {
+		persons, idx, err := s.getCachedList(models.ListType(listNames[0]))
+		if err != nil {
+			return nil, nil, err
+		}
+		return persons, idx, nil
+	}
+
 	var all []models.Person
+	var firstErr error
+	successCount := 0
 
 	for _, name := range listNames {
-		persons, err := s.getCachedList(models.ListType(name))
+		persons, _, err := s.getCachedList(models.ListType(name))
 		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue // skip unknown or unavailable lists
 		}
+		successCount++
 		all = append(all, persons...)
 	}
 
-	return all, nil
+	// If every requested list failed, surface the error so the handler
+	// can return 500 instead of 200 with 0 matches (which conflates
+	// "no matches" with "database is down").
+	if successCount == 0 && firstErr != nil {
+		return nil, nil, firstErr
+	}
+
+	// Build a combined index over the merged persons list so handlers
+	// can use ScreenIndex without rebuilding per call.
+	idx := screening.BuildIndex(all)
+	return all, idx, nil
 }

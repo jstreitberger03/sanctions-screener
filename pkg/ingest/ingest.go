@@ -19,10 +19,17 @@ type Store struct {
 }
 
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=-2000")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=-2000&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+
+	// CGO SQLite (mattn/go-sqlite3) is a single-writer database.
+	// Serializing via a single connection prevents SQLITE_BUSY under
+	// concurrent access and avoids lock contention in the Go connection pool.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS sanctions_list (
@@ -36,6 +43,14 @@ func NewStore(dbPath string) (*Store, error) {
 		)
 	`); err != nil {
 		return nil, fmt.Errorf("create table: %w", err)
+	}
+
+	// Index on list_type so WHERE list_type IN (...) queries avoid
+	// full table scans on the sanctions_list table.
+	if _, err := db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_sanctions_list_type ON sanctions_list(list_type)
+	`); err != nil {
+		return nil, fmt.Errorf("create index: %w", err)
 	}
 
 	return &Store{db: db}, nil
@@ -62,7 +77,12 @@ func (s *Store) ImportEU(path string) ([]models.Person, error) {
 }
 
 func (s *Store) ImportJSONL(path string) ([]models.Person, error) {
-	persons, err := sanctions.Load(path, sanctions.FormatJSONL)
+	return s.ImportJSONLWithType(path, models.ListEU)
+}
+
+// ImportJSONLWithType imports a JSONL file with a configurable default list type.
+func (s *Store) ImportJSONLWithType(path string, defaultListType models.ListType) ([]models.Person, error) {
+	persons, err := sanctions.LoadWithType(path, sanctions.FormatJSONL, defaultListType)
 	if err != nil {
 		return nil, fmt.Errorf("import jsonl: %w", err)
 	}
@@ -154,6 +174,19 @@ func (s *Store) cache(persons []models.Person) error {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback() // no-op after Commit
+
+	// Delete existing rows for each list type present in the batch so
+	// that entries removed from the source don't linger as stale rows.
+	// INSERT OR REPLACE alone only updates existing IDs; it never removes.
+	seen := make(map[models.ListType]bool)
+	for _, p := range persons {
+		seen[p.ListType] = true
+	}
+	for lt := range seen {
+		if _, err := tx.Exec("DELETE FROM sanctions_list WHERE list_type = ?", string(lt)); err != nil {
+			return fmt.Errorf("delete stale rows for %s: %w", lt, err)
+		}
+	}
 
 	stmt, err := tx.Prepare(`
 		INSERT OR REPLACE INTO sanctions_list

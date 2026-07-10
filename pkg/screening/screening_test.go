@@ -267,6 +267,52 @@ func BenchmarkScreenLarge(b *testing.B) {
 // Download the dataset first:
 //
 //	curl -o eu_sanctions.jsonl https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
+//
+// BenchmarkScreenIndexFullDataset measures screening with a pre-built Index —
+// the server cache path. Unlike BenchmarkScreen (which rebuilds the index
+// on every iteration), this isolates the per-query cost after the index is
+// built once. This is the benchmark that validates the token inverted index
+// prefilter reduces allocations and latency vs the O(n) baseline.
+func BenchmarkScreenIndexFullDataset(b *testing.B) {
+	if testing.Short() {
+		b.Skip("skipping full-dataset benchmark in short mode")
+	}
+
+	candidates := []string{
+		"../../eu_sanctions.jsonl",
+		"../../data/eu_full.jsonl",
+		"../../data/eu_sanctions.jsonl",
+	}
+	var dataPath string
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			dataPath = p
+			break
+		}
+	}
+	if dataPath == "" {
+		b.Skip("full dataset not found")
+	}
+
+	store, err := ingest.NewStore(filepath.Join(b.TempDir(), "full.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+
+	persons, err := store.ImportJSONL(dataPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Logf("loaded %d persons from %s", len(persons), dataPath)
+
+	idx := screening.BuildIndex(persons)
+	b.ResetTimer()
+	for b.Loop() {
+		screening.ScreenIndex("Irina Kostenko", idx, 0.8)
+	}
+}
+
 func BenchmarkScreenFullDataset(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping full-dataset benchmark in short mode")

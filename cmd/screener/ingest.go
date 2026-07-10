@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ingestSource string
-	ingestData   string
+	ingestSource   string
+	ingestData     string
+	ingestListType string
 )
 
 var ingestCmd = &cobra.Command{
@@ -35,7 +36,7 @@ var ingestCmd = &cobra.Command{
 		case "eu":
 			persons, err = store.ImportEU(ingestData)
 		case "jsonl":
-			persons, err = store.ImportJSONL(ingestData)
+			persons, err = store.ImportJSONLWithType(ingestData, models.ListType(ingestListType))
 		case "json":
 			persons, err = store.ImportJSON(ingestData)
 		default:
