@@ -1,5 +1,7 @@
 # Binaries
 bin/
+/screener
+/api
 *.exe
 *.exe~
 *.dll
@@ -8,6 +10,14 @@ bin/
 
 # Test binary
 *.test
+coverage.out
+coverage.html
+
+# Editor / tool backup files
+*.bck.*
+*.bak
+*~
+.#*
 
 # Go
 *.out
@@ -29,3 +39,5 @@ data/eu_fsf_raw.json
 data/eu_full.csv
 data/eu_sanctions.json
 eu_sanctions.jsonl
+# Local Pi runtime state
+.atl/

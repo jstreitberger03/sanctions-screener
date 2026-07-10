@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 	"github.com/jstreitberger03/sanctions-screener/pkg/screening"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -78,8 +80,12 @@ func screenFile(path string, persons []models.Person) error {
 	}
 
 	var allMatches []models.Match
-	for _, row := range records {
+	for i, row := range records {
 		if len(row) == 0 {
+			continue
+		}
+		// Skip the header row if it looks like one.
+		if i == 0 && isHeaderRow(row[0]) {
 			continue
 		}
 		matches := screening.Screen(row[0], persons, threshold)
@@ -96,6 +102,16 @@ func screenFile(path string, persons []models.Person) error {
 
 	fmt.Printf("\n%d total matches from %d names\n", len(allMatches), len(records))
 	return nil
+}
+
+// isHeaderRow returns true if the cell looks like a CSV header (common column names).
+func isHeaderRow(cell string) bool {
+	norm := strings.ToLower(strings.TrimSpace(cell))
+	switch norm {
+	case "name", "full_name", "fullname", "entity_name":
+		return true
+	}
+	return false
 }
 
 func writeResults(matches []models.Match, path string) error {

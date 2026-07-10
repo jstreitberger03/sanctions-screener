@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 )
 
@@ -33,12 +35,29 @@ var diacriticReplacer = strings.NewReplacer(
 type Format string
 
 const (
-	FormatCSV      Format = "csv"
-	FormatJSON     Format = "json"
-	FormatJSONL    Format = "jsonl"
+	FormatCSV   Format = "csv"
+	FormatJSON  Format = "json"
+	FormatJSONL Format = "jsonl"
 )
 
+// Normalize lowercases, trims whitespace, and strips common Latin
+// diacritics. As the first step, an NFC pass unifies decomposed
+// (NFD) input into the composed (NFC) form so the byte-sequence
+// diacriticReplacer that follows catches both. NFC/NFD are
+// canonically equivalent per the Unicode Consortium — visually
+// identical inputs always normalize to the same output, so an NFD
+// query now matches the NFC version of the same list entry
+// exactly (previously these collapsed into two distinct normalized
+// strings and could not match).
+//
+// Edge case worth knowing: precomposed Latin letters whose NFD form
+// also has no entry in diacriticReplacer (ǵ → "g" + U+0301, ĳ, ǔ,
+// etc.) compose from their NFD spelling and pass through unchanged.
+// The replacer only covers common Western diacritics; rarer
+// precomposed letters stay as-is rather than collapsing to their
+// base character.
 func Normalize(name string) string {
+	name = norm.NFC.String(name)
 	name = strings.ToLower(name)
 	name = strings.TrimSpace(name)
 	name = diacriticReplacer.Replace(name)

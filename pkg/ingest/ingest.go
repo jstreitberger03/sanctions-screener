@@ -8,9 +8,10 @@ import (
 	"os"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 	"github.com/jstreitberger03/sanctions-screener/pkg/sanctions"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {

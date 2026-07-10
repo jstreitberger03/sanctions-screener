@@ -3,9 +3,10 @@ package main
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
-	"github.com/spf13/cobra"
 )
 
 var (

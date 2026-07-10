@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jstreitberger03/sanctions-screener/internal/server"
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/jstreitberger03/sanctions-screener/internal/server"
 )
 
 func setupTestServer(t *testing.T) (*server.Server, string) {
@@ -156,7 +157,7 @@ func TestGracefulShutdown(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Send SIGINT to trigger the graceful-shutdown path.
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT) //nolint:errcheck // test: signal delivery for graceful shutdown
 
 	select {
 	case err := <-errCh:

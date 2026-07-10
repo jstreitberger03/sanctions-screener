@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jstreitberger03/sanctions-screener/internal/server"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/jstreitberger03/sanctions-screener/internal/server"
 )
 
 type appConfig struct {
@@ -45,6 +46,9 @@ var serveCmd = &cobra.Command{
 			}
 			if cfg.Server.DBPath != "" && dbPath == "sanctions.db" {
 				dbPath = cfg.Server.DBPath
+			}
+			if cfg.Screening.DefaultThreshold != 0 && threshold == 0.8 {
+				threshold = cfg.Screening.DefaultThreshold
 			}
 		}
 

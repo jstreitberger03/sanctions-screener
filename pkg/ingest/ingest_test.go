@@ -68,10 +68,10 @@ func TestStore_CacheWithAliasesAndDOB(t *testing.T) {
 
 	persons := []models.Person{
 		{
-			ID:      "3",
-			Name:    "Alias Person",
-			Aliases: []string{"Alias One", "Alias Two"},
-			Roles:   []string{"individual"},
+			ID:       "3",
+			Name:     "Alias Person",
+			Aliases:  []string{"Alias One", "Alias Two"},
+			Roles:    []string{"individual"},
 			ListType: models.ListEU,
 		},
 	}

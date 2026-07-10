@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Refuse staged binary files so a `go build` artifact (or any other
+# compiled executable) can never land in the repo by accident.
+#
+# Behaviour:
+#   1. Sniff the first 4 bytes of every staged file (POSIX `od`).
+#      Match ELF (Linux), Mach-O (macOS), and PE (Windows) magic.
+#   2. On a hit: `git rm --cached` the file (unstaged, working-tree
+#      copy preserved), append `/<basename>` to .gitignore, and exit 1.
+#   3. Caller re-runs `git commit` after `git add .gitignore`. If they
+#      genuinely need to ship a binary, `git commit --no-verify`.
+#
+# Install: `make install-hooks` (sets `core.hooksPath = .githooks`).
+
+set -e
+
+# Magic-byte sniff. Returns 0 if the file looks like a compiled
+# executable, 1 otherwise. POSIX `od` so no `file(1)` dependency.
+is_binary_executable() {
+    local f="$1" magic
+    magic=$(od -N 4 -t x1 -An "$f" 2>/dev/null | tr -d ' \t\n' || true)
+    case "$magic" in
+        7f454c46*)        return 0 ;;  # ELF (Linux)
+        cffaedfe*)        return 0 ;;  # Mach-O 64-bit LE
+        cefaedfe*)        return 0 ;;  # Mach-O 32-bit LE
+        feedface*)        return 0 ;;  # Mach-O 32-bit BE
+        feedfacf*)        return 0 ;;  # Mach-O 64-bit BE
+        cafebabe*)        return 0 ;;  # Mach-O FAT / Java class
+        4d5a*)            return 0 ;;  # MZ / PE (Windows)
+    esac
+    return 1
+}
+
+violations=0
+
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    # Deletions and renames don't need a sniff — no bytes to look at.
+    [ -f "$file" ] || continue
+    if is_binary_executable "$file"; then
+        echo "🚨 pre-commit: detected staged binary: $file"
+        # Unstage the binary; keep working-tree copy.
+        git rm --cached --quiet "$file" 2>/dev/null || true
+        # Anchor the .gitignore pattern at the root (`/name`) so it
+        # matches the binary regardless of where it ended up — but
+        # note that .gitignore root anchors don't apply to files
+        # already covered by directory rules like `bin/`.
+        base=$(basename "$file")
+        # Skip if an existing rule already covers this file (deterministic
+        # check — no false-positives from a non-matching basename).
+        if ! git check-ignore -q -- "$file"; then
+            printf '\n# pre-commit-hook: auto-added %s\n/%s\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$base" \
+                >> .gitignore
+            printf '   ↳ added /%s to .gitignore\n' "$base"
+        else
+            printf '   ↳ %s is already gitignored, no .gitignore change\n' "$file"
+        fi
+        violations=$((violations + 1))
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ "$violations" -gt 0 ]; then
+    cat >&2 <<EOF
+
+❌ Commit rejected: $violations binary file(s) removed from staging.
+
+The pre-commit hook unstaged these files and updated .gitignore.
+To complete your commit:
+  git add .gitignore    # stage the auto-added ignore rule
+  git commit            # re-run commit (no --no-verify needed)
+
+To bypass intentionally (e.g. shipping a binary release):
+  git commit --no-verify
+EOF
+    exit 1
+fi
+
+exit 0

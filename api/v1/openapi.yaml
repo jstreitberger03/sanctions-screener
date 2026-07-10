@@ -79,7 +79,16 @@ paths:
       responses:
         "200":
           description: List count
-        "400":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  list:
+                    type: string
+                  count:
+                    type: integer
+        "404":
           description: List not found
 components:
   schemas:

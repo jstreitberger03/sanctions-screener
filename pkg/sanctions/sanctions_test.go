@@ -16,6 +16,32 @@ func TestNormalize(t *testing.T) {
 		{"  MÜLLER  ", "muller"},
 		{"françois", "francois"},
 		{"Straße", "strasse"},
+		// Composed (NFC): replacer sequence "é" → "e" hits.
+		{"Café", "cafe"},
+
+		// Decomposed (NFD) forms: norm.NFC unifies them up-front, so the
+		// diacritic replacer catches the resulting composed character.
+		// Inputs are lowercase so ToLower is a no-op and the test
+		// isolates the NFC pass from case-folding.
+		// Composed (NFC) -> diacritic-strip base
+		{"Café", "cafe"},
+
+		// Decomposed (NFD) forms. norm.NFC composes them to NFC, then
+		// the replacer strips the diacritic. Inputs are lowercase so
+		// ToLower is a no-op and the test isolates the NFC pass.
+		{"cafe" + "\u0301", "cafe"},              // e + combining acute (U+0301)
+		{"franc" + "\u0327" + "ois", "francois"}, // c + combining cedilla (U+0327)
+		{"a" + "\u0308", "a"},                    // a + combining diaeresis (U+0308)
+
+		// Non-Latin scripts: exercises both NFC (must preserve bytes
+		// for scripts without combining-mark precomposed forms) AND
+		// ToLower (Cyrillic has real uppercase/lowercase pairing).
+		// The Hebrew and CJK rows are kept as no-op round-trips so a
+		// future regression in the NFC fast-path is still caught on
+		// scripts we don't translate at all.
+		{"Привет", "привет"},
+		{"שָׁלוֹם", "שָׁלוֹם"},
+		{"名前", "名前"},
 	}
 
 	for _, tt := range tests {

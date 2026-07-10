@@ -1,25 +1,44 @@
+version: "2"
 linters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
     - misspell
-    - unconvert
     - prealloc
+    - unconvert
     - whitespace
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/jstreitberger03/sanctions-screener
-  misspell:
-    locale: US
-
+  settings:
+    misspell:
+      locale: US
+    errcheck:
+      exclude-functions:
+        # Deferred close/rollback calls — error is intentionally unactionable.
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (*github.com/jstreitberger03/sanctions-screener/pkg/ingest.Store).Close
+        - os.Remove
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jstreitberger03/sanctions-screener
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

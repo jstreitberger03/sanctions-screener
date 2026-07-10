@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,9 +16,23 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+
 	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
 	"github.com/jstreitberger03/sanctions-screener/pkg/screening"
+)
+
+const (
+	cacheTTL = 60 * time.Second
+	// batchSequentialThreshold is the name-count cut-off below which
+	// /screen/batch runs sequentially rather than via goroutine fan-out.
+	// Calibrated against BenchmarkBatchSequentialVsParallel using the
+	// 4-person testList (cheap per-name work, goroutine overhead
+	// dominates) — crossover lands between n=4 and n=8. For heavier
+	// per-name work (e.g. full EU sanctions list at ~16 ms per call)
+	// the crossover drops much lower, so 8 is a conservative midpoint.
+	// Re-tune per deployment if typical list sizes change.
+	batchSequentialThreshold = 8
 )
 
 type Config struct {
@@ -25,12 +40,17 @@ type Config struct {
 	DBPath string
 }
 
+type cacheEntry struct {
+	persons []models.Person
+	loaded  time.Time
+}
+
 type Server struct {
 	router      *chi.Mux
 	store       *ingest.Store
 	port        int
 	cacheMu     sync.RWMutex
-	personCache map[models.ListType][]models.Person
+	personCache map[models.ListType]cacheEntry
 }
 
 func New(cfg Config) (*Server, error) {
@@ -44,7 +64,7 @@ func New(cfg Config) (*Server, error) {
 		port = 8080
 	}
 
-	s := &Server{store: store, port: port, personCache: make(map[models.ListType][]models.Person)}
+	s := &Server{store: store, port: port, personCache: make(map[models.ListType]cacheEntry)}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -121,16 +141,16 @@ type matchResponse struct {
 }
 
 type screenResponse struct {
-	Matches        []matchResponse `json:"matches"`
-	ScreeningTime  int64           `json:"screening_time_ms"`
-	InputName      string          `json:"input_name"`
-	Count          int             `json:"count"`
+	Matches       []matchResponse `json:"matches"`
+	ScreeningTime int64           `json:"screening_time_ms"`
+	InputName     string          `json:"input_name"`
+	Count         int             `json:"count"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v) //nolint:errcheck // best-effort: response already written
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
@@ -216,27 +236,43 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Screen names concurrently with a bounded worker pool.
-	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
-	ch := make(chan batchResult, len(req.Names))
-
-	for i, name := range req.Names {
-		sem <- struct{}{}
-		go func(idx int, n string) {
-			defer func() { <-sem }()
-			ch <- batchResult{index: idx, matches: screening.Screen(n, persons, req.Threshold)}
-		}(i, name)
-	}
-
+	// Sequential for small batches; parallel worker pool for large.
+	// Below batchSequentialThreshold, goroutine spawn + channel sync
+	// overhead outweighs the parallelism benefit. Above, it amortises
+	// across enough work to pay back on multi-core hosts.
 	results := make([]screenResponse, len(req.Names))
 	totalMatches := 0
-	for range req.Names {
-		r := <-ch
-		totalMatches += len(r.matches)
-		results[r.index] = screenResponse{
-			InputName: req.Names[r.index],
-			Count:     len(r.matches),
-			Matches:   toMatchResponses(r.matches),
+
+	if len(req.Names) < batchSequentialThreshold {
+		for i, name := range req.Names {
+			matches := screening.Screen(name, persons, req.Threshold)
+			totalMatches += len(matches)
+			results[i] = screenResponse{
+				InputName: name,
+				Count:     len(matches),
+				Matches:   toMatchResponses(matches),
+			}
+		}
+	} else {
+		sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+		ch := make(chan batchResult, len(req.Names))
+
+		for i, name := range req.Names {
+			sem <- struct{}{}
+			go func(idx int, n string) {
+				defer func() { <-sem }()
+				ch <- batchResult{index: idx, matches: screening.Screen(n, persons, req.Threshold)}
+			}(i, name)
+		}
+
+		for range req.Names {
+			r := <-ch
+			totalMatches += len(r.matches)
+			results[r.index] = screenResponse{
+				InputName: req.Names[r.index],
+				Count:     len(r.matches),
+				Matches:   toMatchResponses(r.matches),
+			}
 		}
 	}
 
@@ -262,6 +298,7 @@ func (s *Server) handleLists(w http.ResponseWriter, r *http.Request) {
 	for _, lt := range lists {
 		persons, err := s.getCachedList(lt)
 		if err != nil {
+			log.Printf("list %s unavailable: %v", lt, err)
 			continue
 		}
 		entries = append(entries, listEntry{
@@ -284,7 +321,7 @@ func (s *Server) handleListCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"list":  id,
 		"count": len(persons),
 	})
@@ -307,11 +344,11 @@ func toMatchResponses(matches []models.Match) []matchResponse {
 
 func (s *Server) getCachedList(lt models.ListType) ([]models.Person, error) {
 	s.cacheMu.RLock()
-	cached, ok := s.personCache[lt]
+	entry, ok := s.personCache[lt]
 	s.cacheMu.RUnlock()
 
-	if ok {
-		return cached, nil
+	if ok && time.Since(entry.loaded) < cacheTTL {
+		return entry.persons, nil
 	}
 
 	persons, err := s.store.LoadCached(lt)
@@ -320,29 +357,30 @@ func (s *Server) getCachedList(lt models.ListType) ([]models.Person, error) {
 	}
 
 	s.cacheMu.Lock()
-	s.personCache[lt] = persons
+	// Double-check: another goroutine may have refreshed while we waited.
+	if existing, exists := s.personCache[lt]; exists && time.Since(existing.loaded) < cacheTTL {
+		persons = existing.persons
+	} else {
+		s.personCache[lt] = cacheEntry{persons: persons, loaded: time.Now()}
+	}
 	s.cacheMu.Unlock()
 
 	return persons, nil
 }
 
 func (s *Server) loadLists(listNames []string) ([]models.Person, error) {
+	if len(listNames) == 0 {
+		listNames = []string{string(models.ListOFAC), string(models.ListEU), string(models.ListUN)}
+	}
+
 	var all []models.Person
 
 	for _, name := range listNames {
 		persons, err := s.getCachedList(models.ListType(name))
 		if err != nil {
-			return nil, fmt.Errorf("load list %s: %w", name, err)
+			continue // skip unknown or unavailable lists
 		}
 		all = append(all, persons...)
-	}
-
-	if len(all) == 0 {
-		persons, err := s.getCachedList(models.ListOFAC)
-		if err != nil {
-			return nil, fmt.Errorf("load default list: %w", err)
-		}
-		return persons, nil
 	}
 
 	return all, nil

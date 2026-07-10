@@ -27,6 +27,9 @@ jobs:
           go-version: "1.26"
       - name: Install SQLite headers
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      # TestOpenAPISpecMatchesStructs runs as part of `go test ./...` and
+      # fails the build at the first drift between api/v1/openapi.yaml
+      # and internal/server wire-level structs.
       - run: go test -race ./...
       - run: go vet ./...
 

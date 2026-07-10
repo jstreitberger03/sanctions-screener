@@ -2,19 +2,30 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
+	"strconv"
 
 	"github.com/jstreitberger03/sanctions-screener/internal/server"
 )
 
 func main() {
-	port := 8080
-	dbPath := "sanctions.db"
-
-	if p := os.Getenv("PORT"); p != "" {
-		fmt.Sscanf(p, "%d", &port)
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
+}
+
+// run creates and starts the API server. Reads PORT and SCREENER_DB_PATH
+// from the environment. Separated from main() for testability.
+func run() error {
+	port := 8080
+	if p := os.Getenv("PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil {
+			port = v
+		}
+	}
+
+	dbPath := "sanctions.db"
 	if d := os.Getenv("SCREENER_DB_PATH"); d != "" {
 		dbPath = d
 	}
@@ -24,11 +35,8 @@ func main() {
 		DBPath: dbPath,
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-
-	log.Printf("screener API listening on :%d\n", port)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
-	}
+	fmt.Printf("Starting API server on :%d\n", port)
+	return srv.ListenAndServe()
 }

@@ -1,4 +1,4 @@
-.PHONY: build test bench bench-full lint clean
+.PHONY: build test bench bench-full lint clean install-hooks
 
 APP=screener
 API=api
@@ -69,3 +69,8 @@ run:
 clean:
 	rm -rf $(BIN_DIR)
 	rm -f sanctions.db /tmp/bench_full.db
+
+install-hooks:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/*
+	@echo "Git hooks installed (core.hooksPath=.githooks)."

@@ -149,7 +149,7 @@ func TestHaveOverlap(t *testing.T) {
 		// Mixed ASCII + non-ASCII vs pure non-ASCII.
 		{"café", "путин", false}, // 'é' is non-ASCII, but 'c','a','f' are ASCII → hasASCIIa=true, hasASCIIb=false
 		// Empty strings.
-		{"", "", true},   // both non-ASCII → true (conservative)
+		{"", "", true},     // both non-ASCII → true (conservative)
 		{"", "abc", false}, // hasASCIIa=false, hasASCIIb=true → no overlap
 	}
 

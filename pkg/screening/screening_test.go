@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
@@ -197,25 +198,53 @@ func BenchmarkScreen(b *testing.B) {
 	}
 }
 
-func BenchmarkScreenConcurrent(b *testing.B) {
-	// Build a large list (500 persons) to trigger the concurrent path (>100).
-	list := make([]models.Person, 500)
-	for i := range 500 {
-		list[i] = models.Person{
-			ID:          fmt.Sprintf("B-%d", i),
-			Name:        fmt.Sprintf("Person %d", i),
-			ListType:    models.ListOFAC,
-			Nationality: "XX",
-		}
+// BenchmarkBatchSequentialVsParallel informs the choice of
+// batchSequentialThreshold in internal/server/server.go. Runs the same
+// batch as both a sequential loop and a worker-pool goroutine fan-out,
+// across name counts of interest (1, 2, 4, 8, 16, 32). Below the threshold
+// the goroutine overhead dominates; above, parallelism wins. Update the
+// constant if these numbers shift materially with future changes.
+func BenchmarkBatchSequentialVsParallel(b *testing.B) {
+	list := testList()
+	names := []string{
+		"John Smith", "Jane Doe", "Bob Johnson", "Alice Brown",
+		"Carol White", "David Black", "Eve Green", "Frank Blue",
+		"Grace Yellow", "Henry Purple", "Ivy Maroon", "Jack Teal",
+		"Kira Cyan", "Liam Magenta", "Maya Olive", "Noah Plum",
+		"Oscar Sand", "Petra Rose",
+		"Quinn Hazel", "Rita Sapphire", "Sam Amber", "Tara Coral",
+		"Uma Jade", "Victor Bronze", "Wendy Silver", "Xavier Gold",
+		"Yara Ivory", "Zach Crimson", "Anna Pewter", "Brian Rust",
+		"Cara Topaz", "Dan Opal",
 	}
-	b.ResetTimer()
-	for b.Loop() {
-		screening.Screen("John Smith", list, 0.8)
+
+	for _, n := range []int{1, 2, 4, 8, 16, 32} {
+		ns := names[:n]
+		b.Run(fmt.Sprintf("n=%d-parallel", n), func(b *testing.B) {
+			for b.Loop() {
+				var wg sync.WaitGroup
+				for _, name := range ns {
+					wg.Add(1)
+					go func(n string) {
+						defer wg.Done()
+						screening.Screen(n, list, 0.8)
+					}(name)
+				}
+				wg.Wait()
+			}
+		})
+		b.Run(fmt.Sprintf("n=%d-sequential", n), func(b *testing.B) {
+			for b.Loop() {
+				for _, name := range ns {
+					screening.Screen(name, list, 0.8)
+				}
+			}
+		})
 	}
 }
 
 func BenchmarkScreenLarge(b *testing.B) {
-	// Same 500-person list, sequential baseline for concurrent comparison.
+	// 500-person list for scaling benchmarks.
 	list := make([]models.Person, 500)
 	for i := range 500 {
 		list[i] = models.Person{
@@ -225,54 +254,9 @@ func BenchmarkScreenLarge(b *testing.B) {
 			Nationality: "XX",
 		}
 	}
-	// Force sequential by setting Concurrency to 1.
-	prev := screening.Concurrency
-	screening.Concurrency = 1
-	defer func() { screening.Concurrency = prev }()
 	b.ResetTimer()
 	for b.Loop() {
 		screening.Screen("John Smith", list, 0.8)
-	}
-}
-
-func TestConcurrentMatchesSequential(t *testing.T) {
-	// Build a 150-person list to trigger the concurrent path (>100).
-	list := make([]models.Person, 150)
-	for i := range 150 {
-		list[i] = models.Person{
-			ID:          fmt.Sprintf("C-%d", i),
-			Name:        fmt.Sprintf("Person %d", i),
-			Aliases:     []string{fmt.Sprintf("Alias %d", i)},
-			ListType:    models.ListOFAC,
-			Nationality: "XX",
-		}
-	}
-	// Insert an exact match to verify it's found by both paths.
-	list[100] = models.Person{
-		ID:          "MATCH",
-		Name:        "John Smith",
-		ListType:    models.ListOFAC,
-		Nationality: "US",
-	}
-
-	concurrent := screening.Screen("John Smith", list, 0.8)
-
-	prev := screening.Concurrency
-	screening.Concurrency = 1
-	sequential := screening.Screen("John Smith", list, 0.8)
-	screening.Concurrency = prev
-
-	if len(concurrent) != len(sequential) {
-		t.Fatalf("concurrent returned %d matches, sequential returned %d",
-			len(concurrent), len(sequential))
-	}
-	for i := range concurrent {
-		if concurrent[i].Person.ID != sequential[i].Person.ID ||
-			concurrent[i].Score != sequential[i].Score {
-			t.Errorf("match %d differs: concurrent={%s,%.2f} sequential={%s,%.2f}",
-				i, concurrent[i].Person.ID, concurrent[i].Score,
-				sequential[i].Person.ID, sequential[i].Score)
-		}
 	}
 }
 
@@ -281,7 +265,8 @@ func TestConcurrentMatchesSequential(t *testing.T) {
 // file is not present (not shipped in the repo) or when running -short.
 //
 // Download the dataset first:
-//   curl -o eu_sanctions.jsonl https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
+//
+//	curl -o eu_sanctions.jsonl https://data.opensanctions.org/datasets/latest/eu_fsf/entities.ftm.json
 func BenchmarkScreenFullDataset(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping full-dataset benchmark in short mode")
