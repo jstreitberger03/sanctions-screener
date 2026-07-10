@@ -179,7 +179,7 @@ func ScreenIndex(name string, idx *Index, threshold float64) []models.Match {
 	return matches
 }
 
-// matchEntry is the pre-normalized analogue of matchPerson. It performs
+// matchEntry is the pre-normalized analog of matchPerson. It performs
 // the same matching logic (exact, alias, fuzzy, initials) but uses the
 // pre-computed NormName, NormAliases, and Initials fields on Entry,
 // avoiding per-query Normalize allocations.

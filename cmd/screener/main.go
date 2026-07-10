@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(screenCmd)
 	rootCmd.AddCommand(ingestCmd)
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	screenCmd.Flags().StringVarP(&screeningName, "name", "n", "", "Name to screen")
@@ -47,6 +48,10 @@ func init() {
 
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "API server port")
 	serveCmd.Flags().StringVarP(&config, "config", "c", "", "Config file path")
+
+	setupCmd.Flags().StringVarP(&setupSource, "source", "s", "eu", "Lists to download/ingest: eu, ofac, all")
+	setupCmd.Flags().StringVarP(&setupData, "data", "d", "", "Path to local data file (required for OFAC)")
+	setupCmd.Flags().StringVar(&setupURL, "url", "", "Custom download URL (overrides default OpenSanctions URL)")
 
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "sanctions.db", "Path to SQLite database")
 }

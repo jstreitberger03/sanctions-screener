@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"github.com/jstreitberger03/sanctions-screener/internal/server"
+	"github.com/jstreitberger03/sanctions-screener/pkg/ingest"
 )
 
 type appConfig struct {
@@ -50,6 +52,16 @@ var serveCmd = &cobra.Command{
 			if cfg.Screening.DefaultThreshold != 0 && threshold == 0.8 {
 				threshold = cfg.Screening.DefaultThreshold
 			}
+		}
+
+		// Auto-bootstrap: if the database is empty, download and ingest
+		// the EU sanctions list so the server is ready immediately.
+		bootstrapStore, err := ingest.NewStore(dbPath)
+		if err != nil {
+			log.Printf("Auto-bootstrap: cannot open store for check: %v", err)
+		} else {
+			ingest.AutoBootstrap(bootstrapStore)
+			bootstrapStore.Close()
 		}
 
 		srv, err := server.New(server.Config{

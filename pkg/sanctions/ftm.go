@@ -16,9 +16,9 @@ import (
 // It replaces map[string]any parsing for the JSONL path, giving the compiler
 // type-safety, reducing allocations, and enabling faster json.Unmarshal.
 type ftmEntity struct {
-	ID         string     `json:"id"`
-	Schema     string     `json:"schema"`
-	Properties ftmProps   `json:"properties"`
+	ID         string   `json:"id"`
+	Schema     string   `json:"schema"`
+	Properties ftmProps `json:"properties"`
 }
 
 type ftmProps struct {

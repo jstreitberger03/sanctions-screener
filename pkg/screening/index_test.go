@@ -18,14 +18,6 @@ func indexTestList() []models.Person {
 	}
 }
 
-func matchSetKey(m models.Match) string {
-	return m.Person.ID + ":" + string(m.MatchType) + ":" + formatScore(m.Score)
-}
-
-func formatScore(f float64) string {
-	return "" // placeholder
-}
-
 // matchSetsEqual compares two match slices by Person.ID + MatchType + Score
 // (within a small tolerance). Returns true if both have the same match sets.
 func matchSetsEqual(seq []models.Match, matches []models.Match, threshold float64) bool {
