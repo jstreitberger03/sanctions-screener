@@ -159,4 +159,3 @@ func TestJaroWinkler_LongNamesFallback(t *testing.T) {
 		t.Errorf("no-char-overlap long strings: expected 0.0, got %.4f", got)
 	}
 }
-

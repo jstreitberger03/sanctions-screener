@@ -498,6 +498,3 @@ func jaroCoreRune(r1, r2 []rune, m1, m2 []bool) float64 {
 
 	return jaro + float64(prefixLen)*0.1*(1.0-jaro)
 }
-
-
-

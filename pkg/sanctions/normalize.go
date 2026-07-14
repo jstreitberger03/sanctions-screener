@@ -11,9 +11,9 @@ import (
 // Variant labels describe how a search variant was derived from the
 // original name. They are used for explainability and deduplication.
 const (
-	VariantBase      = "base"
-	VariantNoPunct   = "no_punct"
-	VariantTranslit  = "translit"
+	VariantBase     = "base"
+	VariantNoPunct  = "no_punct"
+	VariantTranslit = "translit"
 )
 
 // SearchVariant is a single normalized form of a name, ready for indexing
@@ -43,9 +43,7 @@ func Normalize(name string) string {
 // the same initials.
 func NormalizeQueryVariants(name string) []SearchVariant {
 	variants := NormalizeVariants(name)
-	for _, iv := range queryInitialVariants(name) {
-		variants = append(variants, iv)
-	}
+	variants = append(variants, queryInitialVariants(name)...)
 	variants = deduplicateVariants(variants)
 	return variants
 }
@@ -164,9 +162,7 @@ func collapseSpace(s string) string {
 	}
 	// Trim trailing space if any.
 	res := b.String()
-	if strings.HasSuffix(res, " ") {
-		res = res[:len(res)-1]
-	}
+	res = strings.TrimSuffix(res, " ")
 	return res
 }
 

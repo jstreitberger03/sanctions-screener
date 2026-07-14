@@ -47,9 +47,9 @@ type MatchExplain struct {
 }
 
 type Match struct {
-	Person    Person    `json:"person"`
-	Score     float64   `json:"score"`
-	MatchType MatchType `json:"match_type"`
-	InputName string    `json:"input_name"`
+	Person    Person        `json:"person"`
+	Score     float64       `json:"score"`
+	MatchType MatchType     `json:"match_type"`
+	InputName string        `json:"input_name"`
 	Explain   *MatchExplain `json:"explain,omitempty"` // optional explainability data
 }

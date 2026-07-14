@@ -12,10 +12,10 @@ import (
 // Two complete transliteration schemes are produced to cover the most common
 // ambiguities without creating a combinatorial explosion:
 //
-//   1. Standard (ICAO-style): й→y, х→kh, ц→ts, ч→ch, ш→sh, щ→shch,
-//      ю→yu, я→ya, ё→yo, є→ye, і→i, ї→yi, ґ→g.
-//   2. Alternative (BGN/PCGN-style): й→i, х→h, щ→shch, ю→iu, я→ia,
-//      ё→e, є→ie, і→i, ї→ji, ґ→g.
+//  1. Standard (ICAO-style): й→y, х→kh, ц→ts, ч→ch, ш→sh, щ→shch,
+//     ю→yu, я→ya, ё→yo, є→ye, і→i, ї→yi, ґ→g.
+//  2. Alternative (BGN/PCGN-style): й→i, х→h, щ→shch, ю→iu, я→ia,
+//     ё→e, є→ie, і→i, ї→ji, ґ→g.
 //
 // Hard/soft signs (ь, ъ) and the Ukrainian apostrophe (ґ context) are
 // removed. The function is deterministic and allocation-light for typical

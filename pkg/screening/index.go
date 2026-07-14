@@ -12,10 +12,10 @@ import (
 // variantEntry holds a single normalized variant of a name (primary or alias)
 // along with pre-computed tokens.
 type variantEntry struct {
-	Text      string
-	Tokens    []string
-	Label     string
-	IsAlias   bool
+	Text       string
+	Tokens     []string
+	Label      string
+	IsAlias    bool
 	AliasIndex int // index within Person.Aliases, -1 for primary
 }
 
