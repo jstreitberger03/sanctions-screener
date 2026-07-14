@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-14
+
 ### Added
 
 - **Cross-script matching** in `pkg/sanctions/translit.go`: Cyrillic names are now transliterated into Latin search variants, enabling matches such as `Vladimir Putin` ↔ `Владимир Путин`.
