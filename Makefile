@@ -53,7 +53,7 @@ bench-full: build
 	@echo "=== CLI warm-run timing (Go) ==="
 	@for name in "Irina Kostenko" "Vitaly Kulikov" "Vladimir Putin" "Sberbank"; do \
 		printf "$$name: "; \
-		time ($(BIN_DIR)/$(APP) --db /tmp/bench_full.db screen --name "$$name" 2>/dev/null) 2>&1 | grep real; \
+		time ($(BIN_DIR)/$(APP) --db /tmp/bench_full.db screen --name "$$name" 2>/dev/null) 2>&1 | grep real || true; \
 	done
 	@rm -f /tmp/bench_full.db
 

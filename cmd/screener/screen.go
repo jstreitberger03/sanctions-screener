@@ -80,6 +80,7 @@ func screenFile(path string, persons []models.Person) error {
 	}
 
 	var allMatches []models.Match
+	screenedCount := 0
 	for i, row := range records {
 		if len(row) == 0 {
 			continue
@@ -88,6 +89,7 @@ func screenFile(path string, persons []models.Person) error {
 		if i == 0 && isHeaderRow(row[0]) {
 			continue
 		}
+		screenedCount++
 		matches := screening.Screen(row[0], persons, threshold)
 		allMatches = append(allMatches, matches...)
 	}
@@ -100,7 +102,7 @@ func screenFile(path string, persons []models.Person) error {
 		fmt.Printf("[%.2f] %s matched %s (%s)\n", m.Score, m.InputName, m.Person.Name, m.MatchType)
 	}
 
-	fmt.Printf("\n%d total matches from %d names\n", len(allMatches), len(records))
+	fmt.Printf("\n%d total matches from %d names\n", len(allMatches), screenedCount)
 	return nil
 }
 

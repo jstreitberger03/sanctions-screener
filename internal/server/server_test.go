@@ -265,7 +265,7 @@ func TestScreenAllListsFail500(t *testing.T) {
 	}
 }
 
-func TestScreenExplicitThresholdZero(t *testing.T) {
+func TestScreenInvalidThresholdZero(t *testing.T) {
 	srv, dbPath := setupTestServer(t)
 	seedDB(t, dbPath, []models.Person{
 		{ID: "T1", Name: "John Smith", ListType: models.ListOFAC, Nationality: "US"},
@@ -282,27 +282,8 @@ func TestScreenExplicitThresholdZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Count   int `json:"count"`
-		Matches []struct {
-			Score float64 `json:"score"`
-		} `json:"matches"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("parse response: %v", err)
-	}
-	if resp.Count < 1 {
-		t.Fatalf("expected >=1 match with threshold=0, got %d. Response: %s", resp.Count, w.Body.String())
-	}
-	// The match score should be below 0.8, proving threshold=0 was used.
-	// If the server replaced 0 with 0.8, this match would be filtered.
-	for _, m := range resp.Matches {
-		if m.Score >= 0.8 {
-			t.Errorf("expected a match with score < 0.8 (proving threshold=0), got %.4f", m.Score)
-		}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid threshold, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

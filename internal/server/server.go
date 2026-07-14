@@ -183,6 +183,10 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	if req.Threshold != nil {
 		threshold = *req.Threshold
 	}
+	if err := screening.ValidateThreshold(threshold); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	start := time.Now()
 	_, idx, err := s.loadLists(req.Lists)
@@ -215,11 +219,6 @@ type batchResponse struct {
 	TotalMatches  int              `json:"total_matches"`
 }
 
-type batchResult struct {
-	index   int
-	matches []models.Match
-}
-
 func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	var req batchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -236,6 +235,10 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	if req.Threshold != nil {
 		threshold = *req.Threshold
 	}
+	if err := screening.ValidateThreshold(threshold); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	start := time.Now()
 	_, idx, err := s.loadLists(req.Lists)
@@ -248,45 +251,20 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	// Below batchSequentialThreshold, goroutine spawn + channel sync
 	// overhead outweighs the parallelism benefit. Above, it amortizes
 	// across enough work to pay back on multi-core hosts.
-	results := make([]screenResponse, len(req.Names))
-	totalMatches := 0
+	var results []screenResponse
 
 	if len(req.Names) < batchSequentialThreshold {
+		results = make([]screenResponse, len(req.Names))
 		for i, name := range req.Names {
-			matches := screening.ScreenIndex(name, idx, threshold)
-			totalMatches += len(matches)
-			results[i] = screenResponse{
-				InputName: name,
-				Count:     len(matches),
-				Matches:   toMatchResponses(matches),
-			}
+			results[i] = screenSingle(name, idx, threshold)
 		}
 	} else {
-		sem := make(chan struct{}, runtime.GOMAXPROCS(0))
-		ch := make(chan batchResult, len(req.Names))
+		results = screenBatchParallel(req.Names, idx, threshold)
+	}
 
-		for i, name := range req.Names {
-			sem <- struct{}{}
-			go func(iIdx int, n string) {
-				defer func() { <-sem }()
-				defer func() {
-					if r := recover(); r != nil {
-						ch <- batchResult{index: iIdx}
-					}
-				}()
-				ch <- batchResult{index: iIdx, matches: screening.ScreenIndex(n, idx, threshold)}
-			}(i, name)
-		}
-
-		for range req.Names {
-			r := <-ch
-			totalMatches += len(r.matches)
-			results[r.index] = screenResponse{
-				InputName: req.Names[r.index],
-				Count:     len(r.matches),
-				Matches:   toMatchResponses(r.matches),
-			}
-		}
+	totalMatches := 0
+	for _, res := range results {
+		totalMatches += res.Count
 	}
 
 	resp := batchResponse{
@@ -296,6 +274,65 @@ func (s *Server) handleScreenBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// screenSingle screens a single name and returns the API response struct.
+func screenSingle(name string, idx *screening.Index, threshold float64) screenResponse {
+	matches := screening.ScreenIndex(name, idx, threshold)
+	return screenResponse{
+		InputName: name,
+		Count:     len(matches),
+		Matches:   toMatchResponses(matches),
+	}
+}
+
+// batchJob carries a single item through the parallel worker pool.
+type batchJob struct {
+	index int
+	name  string
+}
+
+// screenSingleRecoverable screens a single name and returns the API response.
+// It recovers from panics, logs them, and returns a zero-valued response so
+// that a single bad item cannot crash the batch worker.
+func screenSingleRecoverable(job batchJob, idx *screening.Index, threshold float64) screenResponse {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic screening batch item %q: %v", job.name, r)
+		}
+	}()
+	return screenSingle(job.name, idx, threshold)
+}
+
+// screenBatchParallel screens a batch of names in parallel using a fixed
+// worker pool. It returns results in the same order as the input names.
+// The worker count is capped at runtime.GOMAXPROCS(0) to avoid
+// oversubscription.
+func screenBatchParallel(names []string, idx *screening.Index, threshold float64) []screenResponse {
+	results := make([]screenResponse, len(names))
+
+	workers := min(runtime.GOMAXPROCS(0), len(names))
+
+	jobs := make(chan batchJob, len(names))
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				results[job.index] = screenSingleRecoverable(job, idx, threshold)
+			}
+		}()
+	}
+
+	for i, name := range names {
+		jobs <- batchJob{index: i, name: name}
+	}
+	close(jobs)
+
+	wg.Wait()
+	return results
 }
 
 type listEntry struct {

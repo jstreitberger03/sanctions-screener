@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -117,16 +118,14 @@ func (s *Store) loadLists(lists []string) ([]models.Person, error) {
 		return nil, nil
 	}
 
-	query := "SELECT id, name, aliases, dob, nationality, list_type, roles FROM sanctions_list WHERE list_type IN ("
+	placeholders := make([]string, len(lists))
 	args := make([]any, len(lists))
 	for i := range lists {
-		if i > 0 {
-			query += ", "
-		}
-		query += "?"
+		placeholders[i] = "?"
 		args[i] = lists[i]
 	}
-	query += ")"
+	query := "SELECT id, name, aliases, dob, nationality, list_type, roles FROM sanctions_list WHERE list_type IN (" +
+		strings.Join(placeholders, ", ") + ")"
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
