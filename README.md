@@ -305,11 +305,13 @@ Apple M4 (10-core), Go 1.26.
 
 | Benchmark | Persons | Time | Allocs/op |
 |-----------|---------|------|-----------|
-| `BenchmarkScreen` | 4 | ~2.4 µs | ~50 |
-| `BenchmarkScreenLarge` | 500 | ~122 µs | ~4,510 |
+| `BenchmarkScreen` | 4 | ~22.9 µs | ~177 |
+| `BenchmarkScreenLarge` | 500 | ~1.71 ms | ~17,823 |
 | `BenchmarkScreenFullDataset` | **5,885** (real EU list) | ~130 ms | ~544,656 |
-| `BenchmarkScreenIndexFullDataset` | **5,885** | ~5.6 ms | ~9,692 |
-| `BenchmarkJaroWinkler` | (micro) | ~33 ns | 0 |
+| `BenchmarkScreenIndexFullDataset` | **5,885** | ~5.53 ms | ~9,692 |
+| `BenchmarkScreenCrossScript` | 2 scripts | ~17.7 µs | ~112 |
+| `BenchmarkScreenTokenMatch` | token pair | ~7.8 µs | ~81 |
+| `BenchmarkJaroWinkler` | (micro) | ~428 ns | 0 |
 
 `BenchmarkScreenFullDataset` measures the full path including index build per query; `BenchmarkScreenIndexFullDataset` reuses a pre-built index. The latter is the relevant server-path metric.
 
