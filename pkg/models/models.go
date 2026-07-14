@@ -27,11 +27,36 @@ const (
 	MatchAlias MatchType = "alias"
 	MatchFuzzy MatchType = "fuzzy"
 	MatchInit  MatchType = "initial"
+
+	// Extended match types for explainability. They are emitted by the
+	// screening engine when the corresponding path is taken.
+	MatchExactPrimary            MatchType = "exact_primary"
+	MatchExactAlias              MatchType = "exact_alias"
+	MatchFuzzyPrimary            MatchType = "fuzzy_primary"
+	MatchFuzzyAlias              MatchType = "fuzzy_alias"
+	MatchTransliteratedExact     MatchType = "transliterated_exact"
+	MatchTransliteratedFuzzy     MatchType = "transliterated_fuzzy"
+	MatchTokenFuzzy              MatchType = "token_fuzzy"
 )
+
+// MatchExplain provides a machine-readable explanation of why a match was
+// produced. It is attached to Match.Explain as an optional, backward-
+// compatible extension.
+type MatchExplain struct {
+	InputVariant   string  `json:"input_variant"`   // normalized query variant used
+	MatchedVariant string  `json:"matched_variant"` // normalized list variant matched
+	Method         string  `json:"method"`          // e.g. exact, fuzzy, token, transliterated
+	Normalization  string  `json:"normalization"`   // e.g. base, no_punct, translit
+	IsAlias        bool    `json:"is_alias"`        // true if the match came from an alias
+	IsTranslit     bool    `json:"is_translit"`     // true if transliteration was used
+	TokenScore     float64 `json:"token_score"`     // token-based sub-score
+	StringScore    float64 `json:"string_score"`    // full-string similarity sub-score
+}
 
 type Match struct {
 	Person    Person    `json:"person"`
 	Score     float64   `json:"score"`
 	MatchType MatchType `json:"match_type"`
 	InputName string    `json:"input_name"`
+	Explain   *MatchExplain `json:"explain,omitempty"` // optional explainability data
 }
