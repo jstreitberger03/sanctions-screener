@@ -64,6 +64,9 @@ func standardScheme() transliterationScheme {
 }
 
 func alternativeScheme() transliterationScheme {
+	// Note: 'и' maps to "y" here intentionally. This variant captures a
+	// common Eastern-European transliteration style and is pinned by the
+	// test suite (e.g. "Владимир Путин" -> "vladymyr putyn").
 	return transliterationScheme{mappings: map[rune]string{
 		'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e",
 		'ё': "e", 'ж': "zh", 'з': "z", 'и': "y", 'й': "y", 'к': "k",

@@ -125,11 +125,6 @@ func scoreVariant(input string, qv sanctions.SearchVariant, ev variantEntry, e *
 		return nil
 	}
 
-	// Transliterated exact match.
-	if isTranslit && qv.Text == ev.Text {
-		return newMatch(e.Person, minScoreExact, models.MatchFuzzy, input, qv.Text, ev.Text, ev.Label, "transliterated_exact", false, true)
-	}
-
 	// Token-based fuzzy match (order-independent).
 	tokenScore, _, _ := tokenMatch(qv.Tokens, ev.Tokens)
 	if tokenScore >= threshold && tokenScore > 0 {

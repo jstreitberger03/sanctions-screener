@@ -30,13 +30,6 @@ const (
 
 	// Extended match types for explainability. They are emitted by the
 	// screening engine when the corresponding path is taken.
-	MatchExactPrimary            MatchType = "exact_primary"
-	MatchExactAlias              MatchType = "exact_alias"
-	MatchFuzzyPrimary            MatchType = "fuzzy_primary"
-	MatchFuzzyAlias              MatchType = "fuzzy_alias"
-	MatchTransliteratedExact     MatchType = "transliterated_exact"
-	MatchTransliteratedFuzzy     MatchType = "transliterated_fuzzy"
-	MatchTokenFuzzy              MatchType = "token_fuzzy"
 )
 
 // MatchExplain provides a machine-readable explanation of why a match was
