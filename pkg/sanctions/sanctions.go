@@ -8,27 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/text/unicode/norm"
-
 	"github.com/jstreitberger03/sanctions-screener/pkg/models"
-)
-
-// diacriticReplacer strips common diacritics. Created once at package init to avoid
-// the expensive trie construction inside the hot path of Normalize.
-var diacriticReplacer = strings.NewReplacer(
-	"ä", "a", "ö", "o", "ü", "u", "ß", "ss",
-	"á", "a", "à", "a", "â", "a", "ã", "a",
-	"é", "e", "è", "e", "ê", "e", "ë", "e",
-	"í", "i", "ì", "i", "î", "i", "ï", "i",
-	"ó", "o", "ò", "o", "ô", "o", "õ", "o",
-	"ú", "u", "ù", "u", "û", "u",
-	"ý", "y", "ÿ", "y",
-	"ñ", "n", "ç", "c",
-	"ă", "a", "ą", "a", "ć", "c", "č", "c",
-	"ď", "d", "đ", "d", "ę", "e", "ě", "e",
-	"ğ", "g", "ı", "i", "ł", "l", "ń", "n",
-	"ň", "n", "ř", "r", "ś", "s", "š", "s",
-	"ţ", "t", "ť", "t", "ž", "z",
 )
 
 type Format string
@@ -38,30 +18,6 @@ const (
 	FormatJSON  Format = "json"
 	FormatJSONL Format = "jsonl"
 )
-
-// Normalize lowercases, trims whitespace, and strips common Latin
-// diacritics. As the first step, an NFC pass unifies decomposed
-// (NFD) input into the composed (NFC) form so the byte-sequence
-// diacriticReplacer that follows catches both. NFC/NFD are
-// canonically equivalent per the Unicode Consortium — visually
-// identical inputs always normalize to the same output, so an NFD
-// query now matches the NFC version of the same list entry
-// exactly (previously these collapsed into two distinct normalized
-// strings and could not match).
-//
-// Edge case worth knowing: precomposed Latin letters whose NFD form
-// also has no entry in diacriticReplacer (ǵ → "g" + U+0301, ĳ, ǔ,
-// etc.) compose from their NFD spelling and pass through unchanged.
-// The replacer only covers common Western diacritics; rarer
-// precomposed letters stay as-is rather than collapsing to their
-// base character.
-func Normalize(name string) string {
-	name = norm.NFC.String(name)
-	name = strings.ToLower(name)
-	name = strings.TrimSpace(name)
-	name = diacriticReplacer.Replace(name)
-	return name
-}
 
 func Load(path string, format Format) ([]models.Person, error) {
 	return LoadWithType(path, format, models.ListEU)

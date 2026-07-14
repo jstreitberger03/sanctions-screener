@@ -44,7 +44,8 @@ func TestNormalize(t *testing.T) {
 		// future regression in the NFC fast-path is still caught on
 		// scripts we don't translate at all.
 		{"Привет", "привет"},
-		{"שָׁלוֹם", "שָׁלוֹם"},
+		// Hebrew niqqud (combining diacritics) are stripped.
+		{"שָׁלוֹם", "שלום"},
 		{"名前", "名前"},
 	}
 
