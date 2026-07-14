@@ -82,7 +82,7 @@ func TestBuildIndex_TokensInserted(t *testing.T) {
 
 	// Query "Johnson Smith" → should find John Smith and Jon Smyth via "jo"
 	// and "sm" token overlap, but NOT Alice Brown.
-	matches := screening.ScreenIndex("Johnson Smith", idx, 0.0)
+	matches := screening.ScreenIndex("Johnson Smith", idx, 0.5)
 	ids := make(map[string]bool)
 	for _, m := range matches {
 		ids[m.Person.ID] = true

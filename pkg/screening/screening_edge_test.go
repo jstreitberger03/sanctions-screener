@@ -33,11 +33,13 @@ func TestMultilingualExactMatch(t *testing.T) {
 			wantMinScore: 1.0,
 		},
 		{
-			name:       "cyrillic query against latin transliteration does NOT match",
-			personName: "Владимир Путин",
-			query:      "Vladimir Putin",
-			threshold:  0.8,
-			wantCount:  0,
+			name:         "cyrillic query against latin transliteration now matches",
+			personName:   "Владимир Путин",
+			query:        "Vladimir Putin",
+			threshold:    0.8,
+			wantCount:    1,
+			wantType:     models.MatchFuzzy,
+			wantMinScore: 1.0,
 		},
 		{
 			name:         "cjk exact match (literal same string)",
@@ -170,16 +172,16 @@ func TestPunctuationFallsThroughToFuzzy(t *testing.T) {
 			query:      "OBrien",
 			personName: "O'Brien",
 			wantCount:  1,
-			wantType:   models.MatchFuzzy,
-			minScore:   0.90,
+			wantType:   models.MatchExact,
+			minScore:   1.0,
 		},
 		{
 			name:       "hyphen replaced by space (Jean Paul vs Jean-Paul)",
 			query:      "Jean Paul Sartre",
 			personName: "Jean-Paul Sartre",
 			wantCount:  1,
-			wantType:   models.MatchFuzzy,
-			minScore:   0.90,
+			wantType:   models.MatchExact,
+			minScore:   1.0,
 		},
 		{
 			name:       "dot in initials query still produces fuzzy match",
@@ -210,22 +212,19 @@ func TestPunctuationFallsThroughToFuzzy(t *testing.T) {
 	}
 }
 
-// Reversed name order is a known Jaro-Winkler limitation. "Smith John"
-// against "John Smith" produces JW ~0.53 (dependency on first-character
-// match + match-distance window) and does NOT cross the typical 0.8
-// threshold. Production deployers wanting order-robust matching need a
-// pre-processing pass that sorts name tokens before querying. This test
-// pins the current behavior — any silent change to JW or match window
-// size will be caught here.
-func TestReversedNameOrderDoesNotMatch(t *testing.T) {
+// Reversed name order is now handled by the token-based matcher.
+// "Smith John" against "John Smith" should produce a high-scoring fuzzy
+// match because the tokens are the same, just reordered.
+func TestReversedNameOrderMatches(t *testing.T) {
 	persons := []models.Person{
 		{ID: "1", Name: "Smith John", ListType: models.ListOFAC},
 	}
 	matches := screening.Screen("John Smith", persons, 0.8)
-	// JW("john smith","smith john") ≈ 0.53 — below threshold.
-	if len(matches) != 0 {
-		t.Fatalf("reversed-name pair produced %d matches, want 0 (JW ~0.53 below 0.8): %+v",
-			len(matches), matches)
+	if len(matches) == 0 {
+		t.Fatalf("reversed-name pair produced no matches, want at least 1")
+	}
+	if matches[0].Score < 0.9 {
+		t.Errorf("expected high score for reversed names, got %.4f", matches[0].Score)
 	}
 }
 
@@ -315,47 +314,31 @@ func TestTwoSameNamedPersonsBothReturned(t *testing.T) {
 	}
 }
 
-// JW scores are bounded at [0.0, 1.0]. Threshold = 0 effectively accepts
-// every match that JW produces, including zero-overlap pairs where JW
-// returns 0.0 — because the check is `bestScore < threshold`, and 0.0
-// < 0.0 is false. This is degenerate input behavior; pinning it here
-// means any future change to the threshold floor surfaces immediately.
-func TestZeroThresholdAcceptsAnyMatch(t *testing.T) {
+// Threshold validation rejects non-positive thresholds. The engine only
+// accepts thresholds in (0, 1].
+func TestInvalidThresholdRejected(t *testing.T) {
 	persons := []models.Person{
 		{ID: "1", Name: "John Smith", ListType: models.ListOFAC},
 	}
 
-	t.Run("moderate similarity matches at threshold 0", func(t *testing.T) {
-		// JW("jon smith","john smith") ~0.92.
+	t.Run("threshold 0 is rejected", func(t *testing.T) {
 		matches := screening.Screen("Jon Smith", persons, 0.0)
-		if len(matches) < 1 {
-			t.Fatalf("got %d matches, want >= 1", len(matches))
-		}
-		if matches[0].Score < 0.9 {
-			t.Errorf("got score %.4f, want >= 0.9", matches[0].Score)
+		if len(matches) != 0 {
+			t.Fatalf("expected 0 matches for invalid threshold, got %d", len(matches))
 		}
 	})
 
-	t.Run("zero-character-overlap query is still returned as a Match (score=0.0)", func(t *testing.T) {
-		// 'X' shares no characters with 'John Smith' — haveOverlap returns
-		// false, fuzzy JW does not run, bestScore stays 0.0. The threshold
-		// check `0.0 < 0.0` is false, so the match is emitted as score 0.0.
-		// Callers that pass threshold <= 0 must validate matches themselves.
-		matches := screening.Screen("X", persons, 0.0)
-		if len(matches) != 1 {
-			t.Fatalf("got %d matches, want 1 (zero threshold boundary)", len(matches))
-		}
-		if matches[0].Score != 0.0 {
-			t.Errorf("got score %.4f, want exactly 0.0", matches[0].Score)
-		}
-	})
-
-	t.Run("negative threshold (-0.5) behaves like 0", func(t *testing.T) {
-		// Negative thresholds collapse with 0 in the `<` comparison; same
-		// boundary behavior — degenerate matches can be returned.
+	t.Run("negative threshold is rejected", func(t *testing.T) {
 		matches := screening.Screen("X", persons, -0.5)
-		if len(matches) != 1 {
-			t.Fatalf("got %d matches, want 1 (negative threshold behaves as >=0)", len(matches))
+		if len(matches) != 0 {
+			t.Fatalf("expected 0 matches for invalid threshold, got %d", len(matches))
+		}
+	})
+
+	t.Run("threshold above 1 is rejected", func(t *testing.T) {
+		matches := screening.Screen("X", persons, 1.5)
+		if len(matches) != 0 {
+			t.Fatalf("expected 0 matches for invalid threshold, got %d", len(matches))
 		}
 	})
 }

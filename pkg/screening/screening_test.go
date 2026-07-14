@@ -313,6 +313,24 @@ func BenchmarkScreenIndexFullDataset(b *testing.B) {
 	}
 }
 
+func BenchmarkScreenCrossScript(b *testing.B) {
+	persons := []models.Person{
+		{ID: "X-1", Name: "Владимир Путин", ListType: models.ListOFAC},
+	}
+	for b.Loop() {
+		screening.Screen("Vladimir Putin", persons, 0.8)
+	}
+}
+
+func BenchmarkScreenTokenMatch(b *testing.B) {
+	persons := []models.Person{
+		{ID: "X-1", Name: "John Paul Smith", ListType: models.ListOFAC},
+	}
+	for b.Loop() {
+		screening.Screen("Smith John", persons, 0.8)
+	}
+}
+
 func BenchmarkScreenFullDataset(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping full-dataset benchmark in short mode")

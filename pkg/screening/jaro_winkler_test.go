@@ -160,39 +160,3 @@ func TestJaroWinkler_LongNamesFallback(t *testing.T) {
 	}
 }
 
-func TestHaveOverlap(t *testing.T) {
-	tests := []struct {
-		a, b     string
-		expected bool
-	}{
-		// Both ASCII, share bytes.
-		{"john", "johnson", true},
-		{"abc", "cde", true},
-		// Both ASCII, no common bytes.
-		{"abc", "xyz", false},
-		// ASCII vs pure non-ASCII (Cyrillic).
-		{"john", "путин", false},
-		{"putin", "путин", false},
-		// Both non-ASCII (conservative: returns true).
-		{"путин", "медведев", true},
-		{"путин", "путин", true},
-		// Mixed ASCII + non-ASCII vs pure non-ASCII.
-		{"café", "путин", false}, // 'é' is non-ASCII, but 'c','a','f' are ASCII → hasASCIIa=true, hasASCIIb=false
-		// Empty strings.
-		{"", "", true},     // both non-ASCII → true (conservative)
-		{"", "abc", false}, // hasASCIIa=false, hasASCIIb=true → no overlap
-	}
-
-	for _, tt := range tests {
-		got := haveOverlap(tt.a, tt.b)
-		if got != tt.expected {
-			t.Errorf("haveOverlap(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.expected)
-		}
-	}
-}
-
-func BenchmarkHaveOverlap(b *testing.B) {
-	for b.Loop() {
-		haveOverlap("john smith", "путин владимир")
-	}
-}
